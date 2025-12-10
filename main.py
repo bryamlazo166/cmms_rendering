@@ -1,17 +1,20 @@
 import streamlit as st
-from modules import gestion_activos, almacen, monitoreo
+import os
 
-st.set_page_config(page_title="CMMS Rendering", layout="wide", page_icon="🏭")
-st.sidebar.title("CMMS Rendering")
+st.title("🛠️ Diagnóstico de Archivos")
 
-menu = ["Gestión de Activos (Arbol)", "Almacén de Repuestos", "Monitoreo Predictivo"]
-opcion = st.sidebar.radio("Navegación:", menu)
+st.write("Carpeta actual:", os.getcwd())
+st.write("Archivos en raíz:", os.listdir('.'))
 
-if opcion == "Gestión de Activos (Arbol)":
-    gestion_activos.render_gestion_activos()
+if os.path.exists('modules'):
+    st.write("Archivos en 'modules':", os.listdir('modules'))
+else:
+    st.error("❌ LA CARPETA 'modules' NO EXISTE O NO SE ENCUENTRA.")
 
-elif opcion == "Almacén de Repuestos":
-    almacen.render_almacen_view()
-
-elif opcion == "Monitoreo Predictivo":
-    monitoreo.render_monitoreo_view()
+try:
+    from modules import gestion_activos
+    st.success("✅ ¡ÉXITO! Se pudo importar gestion_activos.")
+except ImportError as e:
+    st.error(f"❌ Error importando: {e}")
+except Exception as e:
+    st.error(f"❌ Otro error: {e}")
