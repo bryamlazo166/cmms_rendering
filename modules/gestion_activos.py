@@ -17,10 +17,15 @@ def asegurar_df(df, columnas_base):
             df[col] = None
     return df
 
+# --- HELPER: LIMPIEZA DE IDs (CRÍTICO PARA EL ÁRBOL) ---
+def limpiar_id(serie):
+    """Convierte a string y elimina el .0 decimal que agrega Excel"""
+    return serie.astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
+
 # --- HELPER: SELECTOR DINÁMICO ---
 def gestionar_filtro_dinamico(label, opciones_existentes, key_suffix):
     if opciones_existentes is None: opciones_existentes = []
-    # Convertimos a string para evitar errores de tipos mixtos
+    # Convertimos a string para evitar errores
     opciones_limpias = [str(x) for x in opciones_existentes if pd.notna(x) and str(x) != ""]
     opciones = sorted(list(set(opciones_limpias)))
     
@@ -43,30 +48,31 @@ def gestionar_filtro_dinamico(label, opciones_existentes, key_suffix):
 def render_gestion_activos():
     st.header("🏭 Gestión y Edición de Activos")
     
-    # Definimos 3 pestañas explícitas
     tab_arbol, tab_manual, tab_masiva = st.tabs(["🌳 Visualizar Árbol Completo", "✏️ Gestión & Edición", "📦 Carga Masiva"])
 
-    # Carga de datos SEGURA
+    # Carga de datos
     df_eq = asegurar_df(get_data("equipos"), COLS_EQUIPOS)
     df_sys = asegurar_df(get_data("sistemas"), COLS_SISTEMAS)
     df_comp = asegurar_df(get_data("componentes"), COLS_COMPONENTES)
 
-    # --- PRE-PROCESAMIENTO PARA GARANTIZAR ENLACES ---
-    if not df_sys.empty:
-        df_sys['equipo_tag'] = df_sys['equipo_tag'].astype(str)
-        df_sys['id'] = df_sys['id'].astype(str)
+    # --- NORMALIZACIÓN DE IDs (LA SOLUCIÓN AL PROBLEMA VISUAL) ---
+    # Convertimos todo a Texto Limpio ("1" y no "1.0") para que crucen bien
     if not df_eq.empty:
-        df_eq['tag'] = df_eq['tag'].astype(str)
+        df_eq['tag'] = df_eq['tag'].astype(str).str.strip().str.upper()
+        
+    if not df_sys.empty:
+        df_sys['id'] = limpiar_id(df_sys['id'])
+        df_sys['equipo_tag'] = df_sys['equipo_tag'].astype(str).str.strip().str.upper()
+        
     if not df_comp.empty:
-        # Limpiamos IDs flotantes (ej: "1.0" -> "1")
-        df_comp['sistema_id'] = df_comp['sistema_id'].astype(str).str.replace(r"\.0$", "", regex=True)
+        df_comp['sistema_id'] = limpiar_id(df_comp['sistema_id'])
 
     # ==========================================
-    # TAB 1: VISUALIZACIÓN DEL ÁRBOL (DETALLADO)
+    # TAB 1: VISUALIZACIÓN DEL ÁRBOL
     # ==========================================
     with tab_arbol:
         if df_eq.empty:
-            st.info("No hay activos registrados. Ve a la pestaña de Gestión.")
+            st.info("No hay activos registrados.")
         else:
             plantas = df_eq['planta'].unique()
             for planta in plantas:
@@ -82,37 +88,35 @@ def render_gestion_activos():
                         for _, eq in equipos.iterrows():
                             # Nivel 3: Equipo
                             with st.expander(f"🔹 {eq['nombre']} ({eq['tag']})"):
-                                col_info1, col_info2 = st.columns(2)
-                                col_info1.caption(f"Tipo: {eq['tipo']} | Criticidad: {eq['criticidad']}")
-                                col_info2.caption(f"Estado: {eq['estado']}")
+                                st.caption(f"Tipo: {eq['tipo']} | Criticidad: {eq['criticidad']} | Estado: {eq['estado']}")
                                 
                                 # Nivel 4: Sistemas
                                 if not df_sys.empty:
+                                    # Cruce seguro por TAG
                                     sistemas = df_sys[df_sys['equipo_tag'] == str(eq['tag'])]
                                     
                                     if sistemas.empty:
-                                        st.warning("⚠️ Sin sistemas registrados.")
+                                        st.caption("⚠️ Sin sistemas asociados.")
                                     
                                     for _, sys in sistemas.iterrows():
                                         st.markdown("---")
                                         st.markdown(f"#### 🎛️ Sistema: {sys['nombre']}")
-                                        if sys['descripcion']:
-                                            st.caption(f"_{sys['descripcion']}_")
+                                        if sys['descripcion']: st.caption(f"_{sys['descripcion']}_")
                                         
                                         # Nivel 5: Componentes
                                         if not df_comp.empty:
+                                            # Cruce seguro por ID
                                             comps = df_comp[df_comp['sistema_id'] == str(sys['id'])]
                                             
                                             if not comps.empty:
                                                 for _, comp in comps.iterrows():
-                                                    # Tarjeta visual de detalle
+                                                    # Tarjeta de Componente
                                                     st.markdown(f"""
-                                                    <div style="background-color: #f0f2f6; padding: 10px; border-radius: 5px; margin-bottom: 5px; border-left: 4px solid #ff4b4b;">
-                                                        <strong>🔧 {comp['nombre']}</strong><br>
-                                                        <span style="font-size: 0.85em;">
-                                                        🏷️ <strong>Marca:</strong> {comp['marca']} | <strong>Mod:</strong> {comp['modelo']}<br>
-                                                        📦 <strong>Cant:</strong> {comp['cantidad']} | <strong>Cat:</strong> {comp['categoria']}<br>
-                                                        🔗 <strong>Repuesto SKU:</strong> {comp['repuesto_sku']}
+                                                    <div style="background-color: #f0f2f6; padding: 10px; border-radius: 5px; margin-top: 5px; border-left: 4px solid #ff4b4b;">
+                                                        <strong>🔧 {comp['nombre']}</strong> <small>({comp['categoria']})</small><br>
+                                                        <span style="font-size: 0.9em; color: #333;">
+                                                        • <strong>Marca:</strong> {comp['marca']} | <strong>Modelo:</strong> {comp['modelo']}<br>
+                                                        • <strong>Cant:</strong> {comp['cantidad']} | <strong>SKU:</strong> {comp['repuesto_sku']}
                                                         </span>
                                                     </div>
                                                     """, unsafe_allow_html=True)
@@ -179,11 +183,9 @@ def render_gestion_activos():
                             if st.form_submit_button(btn_txt):
                                 if es_nuevo_eq:
                                     new_id = 1
-                                    if not df_eq.empty and 'id' in df_eq:
-                                         try:
-                                             new_id = int(pd.to_numeric(df_eq['id']).max()) + 1
-                                         except:
-                                             new_id = len(df_eq) + 1
+                                    if not df_eq.empty:
+                                         try: new_id = int(pd.to_numeric(df_eq['id']).max()) + 1
+                                         except: new_id = len(df_eq) + 1
                                         
                                     row = pd.DataFrame([{
                                         "id": new_id, "tag": val_tag, "nombre": equipo_sel,
@@ -264,8 +266,9 @@ def render_gestion_activos():
                         
                         comp_exist = []
                         if not df_comp.empty:
-                            # Asegurar ID como string para filtrar
-                            mask_comp = df_comp['sistema_id'].astype(str).str.replace(r"\.0$", "", regex=True) == str(sistema_id)
+                            # Asegurar ID como string para filtrar (con limpieza de .0)
+                            sys_id_clean = limpiar_id(pd.Series([sistema_id]))[0]
+                            mask_comp = limpiar_id(df_comp['sistema_id']) == sys_id_clean
                             comp_exist = df_comp[mask_comp]['nombre'].tolist()
                         
                         comp_sel, es_nuevo_comp = gestionar_filtro_dinamico("Componente", comp_exist, "comp")
@@ -279,7 +282,8 @@ def render_gestion_activos():
                                 
                                 if not es_nuevo_comp:
                                     try:
-                                        mask_c = (df_comp['sistema_id'].astype(str).str.replace(r"\.0$", "", regex=True) == str(sistema_id)) & (df_comp['nombre'] == comp_sel)
+                                        sys_id_clean = limpiar_id(pd.Series([sistema_id]))[0]
+                                        mask_c = (limpiar_id(df_comp['sistema_id']) == sys_id_clean) & (df_comp['nombre'] == comp_sel)
                                         c_row = df_comp[mask_c].iloc[0]
                                         def_marca = c_row['marca']
                                         def_mod = c_row['modelo']
