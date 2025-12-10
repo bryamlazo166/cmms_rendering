@@ -1,20 +1,20 @@
 import streamlit as st
-import os
+# Ahora sí funcionará porque existen los 3 archivos
+from modules import gestion_activos, almacen, monitoreo
 
-st.title("🛠️ Diagnóstico de Archivos")
+st.set_page_config(page_title="CMMS Rendering", layout="wide", page_icon="🏭")
+st.sidebar.image("https://cdn-icons-png.flaticon.com/512/900/900782.png", width=50)
+st.sidebar.title("CMMS Rendering")
 
-st.write("Carpeta actual:", os.getcwd())
-st.write("Archivos en raíz:", os.listdir('.'))
+# Menú Principal
+menu = ["Gestión de Activos (Arbol)", "Almacén de Repuestos", "Monitoreo Predictivo"]
+opcion = st.sidebar.radio("Ir a:", menu)
 
-if os.path.exists('modules'):
-    st.write("Archivos en 'modules':", os.listdir('modules'))
-else:
-    st.error("❌ LA CARPETA 'modules' NO EXISTE O NO SE ENCUENTRA.")
+if opcion == "Gestión de Activos (Arbol)":
+    gestion_activos.render_gestion_activos()
 
-try:
-    from modules import gestion_activos
-    st.success("✅ ¡ÉXITO! Se pudo importar gestion_activos.")
-except ImportError as e:
-    st.error(f"❌ Error importando: {e}")
-except Exception as e:
-    st.error(f"❌ Otro error: {e}")
+elif opcion == "Almacén de Repuestos":
+    almacen.render_almacen_view()
+
+elif opcion == "Monitoreo Predictivo":
+    monitoreo.render_monitoreo_view()
