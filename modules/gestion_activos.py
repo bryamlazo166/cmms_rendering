@@ -4,12 +4,8 @@ from utils.db_con import get_data, save_data
 
 # --- FUNCIÓN HELPER: SELECTOR DINÁMICO ---
 def gestionar_filtro_dinamico(label, opciones_existentes, key_suffix):
-    """
-    Selector que permite elegir de lo existente o crear uno nuevo.
-    """
     opciones_limpias = [x for x in opciones_existentes if pd.notna(x) and x != ""]
     opciones = sorted(list(set(opciones_limpias)))
-    
     opciones.insert(0, "➕ AGREGAR NUEVO...")
     opciones.insert(0, "Seleccionar...")
     
@@ -30,63 +26,47 @@ def gestionar_filtro_dinamico(label, opciones_existentes, key_suffix):
 def render_gestion_activos():
     st.header("🏭 Gestión Integral de Activos")
     
-    # Pestañas reorganizadas para dar prioridad al Árbol Visual
-    tab_arbol, tab_manual, tab_masiva = st.tabs(["🌳 Visualizar Árbol", "👆 Gestión Manual", "📦 Carga Masiva"])
+    tab_arbol, tab_manual, tab_masiva = st.tabs(["🌳 Visualizar Árbol", "👆 Gestión & Edición", "📦 Carga Masiva"])
 
     # ==========================================
-    # TAB 1: VISUALIZACIÓN DEL ÁRBOL (NUEVO)
+    # TAB 1: VISUALIZACIÓN DEL ÁRBOL
     # ==========================================
     with tab_arbol:
         st.subheader("Estructura Jerárquica de Planta")
-        
-        # Cargar todos los datos
         df_eq = get_data("equipos")
         df_sys = get_data("sistemas")
         df_comp = get_data("componentes")
         
         if df_eq.empty:
-            st.info("No hay activos registrados. Ve a la pestaña de Gestión Manual.")
+            st.info("No hay activos registrados.")
         else:
-            # Agrupar por Planta -> Área
             plantas = df_eq['planta'].unique()
-            
             for planta in plantas:
-                # Nivel 1: Planta
                 with st.expander(f"🏭 Planta: {planta}", expanded=True):
                     areas = df_eq[df_eq['planta'] == planta]['area'].unique()
-                    
                     for area in areas:
                         st.markdown(f"**📍 Área: {area}**")
-                        
-                        # Nivel 3: Equipos
                         equipos_area = df_eq[(df_eq['planta'] == planta) & (df_eq['area'] == area)]
-                        
                         for _, eq in equipos_area.iterrows():
-                            # Usamos columnas para indentar visualmente
                             col_space, col_content = st.columns([0.5, 10])
                             with col_content:
                                 with st.expander(f"🔹 {eq['nombre']} ({eq['tag']})"):
-                                    st.caption(f"Tipo: {eq['tipo']} | Criticidad: {eq['criticidad']}")
-                                    
-                                    # Nivel 4: Sistemas
+                                    st.caption(f"Tipo: {eq['tipo']} | Estado: {eq['estado']}")
                                     if not df_sys.empty:
                                         sistemas = df_sys[df_sys['equipo_tag'] == eq['tag']]
                                         for _, sys in sistemas.iterrows():
                                             st.markdown(f"- 🎛️ **Sistema:** {sys['nombre']}")
-                                            
-                                            # Nivel 5: Componentes
                                             if not df_comp.empty:
                                                 comps = df_comp[df_comp['sistema_id'] == sys['id']]
                                                 for _, comp in comps.iterrows():
-                                                    st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 🔧 {comp['nombre']} | Marca: {comp['marca']} | Cant: {comp['cantidad']}")
+                                                    st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; 🔧 {comp['nombre']} | {comp['marca']} ({comp['cantidad']})")
 
     # ==========================================
-    # TAB 2: CARGA MANUAL EN CASCADA
+    # TAB 2: GESTIÓN MANUAL Y EDICIÓN
     # ==========================================
     with tab_manual:
-        st.markdown("##### Seleccione o cree niveles en orden descendente")
+        st.markdown("##### Navegación y Edición")
         
-        # Cargar datos frescos
         df_equipos = get_data("equipos")
         df_sistemas = get_data("sistemas")
         
@@ -99,7 +79,6 @@ def render_gestion_activos():
             areas_exist = []
             if not df_equipos.empty:
                 areas_exist = df_equipos[df_equipos['planta'] == planta_val]['area'].unique().tolist()
-            
             area_val, _ = gestionar_filtro_dinamico("Área", areas_exist, "area")
             
             if area_val:
@@ -110,50 +89,89 @@ def render_gestion_activos():
                 with col_eq1:
                     eqs_exist = []
                     if not df_equipos.empty:
-                        eqs_exist = df_equipos[
-                            (df_equipos['planta'] == planta_val) & 
-                            (df_equipos['area'] == area_val)
-                        ]['nombre'].tolist()
+                        eqs_exist = df_equipos[(df_equipos['planta'] == planta_val) & (df_equipos['area'] == area_val)]['nombre'].tolist()
                     
                     modo_equipo = st.radio("Acción Equipo:", ["Seleccionar Existente", "Crear Nuevo Equipo"], horizontal=True)
                 
+                # Variables para guardar selección
+                equipo_seleccionado_row = None 
                 tag_equipo_final = None
                 nombre_equipo_final = None
 
+                # MODO: CREAR NUEVO
                 if modo_equipo == "Crear Nuevo Equipo":
                     with col_eq2:
                         st.markdown("**Nuevo Equipo**")
-                        # CAMPOS VACÍOS (TEXT INPUT) PARA LIBERTAD TOTAL
                         new_tag = st.text_input("TAG (Único)", placeholder="Ej: DIG-01").strip().upper()
                         new_nom = st.text_input("Nombre")
-                        
-                        # Tipo ahora es libre, sin lista predefinida
-                        tipo = st.text_input("Tipo de Equipo", placeholder="Ej: Digestor, Prensa...")
-                        
-                        # Criticidad opcional pero con lista vacía inicial
+                        tipo = st.text_input("Tipo de Equipo")
                         crit = st.selectbox("Criticidad", ["", "Alta", "Media", "Baja"], index=0)
                         
                         if st.button("Guardar Equipo"):
                             if new_tag and new_nom:
-                                new_id = 1 if df_equipos.empty else df_equipos['id'].max() + 1
-                                row = pd.DataFrame([{
-                                    "id": new_id, "tag": new_tag, "nombre": new_nom,
-                                    "planta": planta_val, "area": area_val,
-                                    "tipo": tipo, "criticidad": crit, "estado": "Operativo"
-                                }])
-                                save_data(pd.concat([df_equipos, row], ignore_index=True), "equipos")
-                                st.success("Equipo Guardado")
-                                st.rerun()
+                                # Validar TAG duplicado
+                                if not df_equipos.empty and new_tag in df_equipos['tag'].values:
+                                    st.error("⚠️ El TAG ya existe.")
+                                else:
+                                    new_id = 1 if df_equipos.empty else df_equipos['id'].max() + 1
+                                    row = pd.DataFrame([{
+                                        "id": new_id, "tag": new_tag, "nombre": new_nom,
+                                        "planta": planta_val, "area": area_val,
+                                        "tipo": tipo, "criticidad": crit, "estado": "Operativo"
+                                    }])
+                                    save_data(pd.concat([df_equipos, row], ignore_index=True), "equipos")
+                                    st.success("Equipo Guardado")
+                                    st.rerun()
+                
+                # MODO: SELECCIONAR EXISTENTE
                 else:
                     if eqs_exist:
                         with col_eq2:
                             nom_sel = st.selectbox("Equipo Existente", eqs_exist)
-                            datos_eq = df_equipos[(df_equipos['nombre'] == nom_sel) & (df_equipos['area'] == area_val)]
-                            if not datos_eq.empty:
-                                tag_equipo_final = datos_eq.iloc[0]['tag']
-                                nombre_equipo_final = nom_sel
+                            # Obtener fila completa del equipo
+                            equipo_seleccionado_row = df_equipos[(df_equipos['nombre'] == nom_sel) & (df_equipos['area'] == area_val)].iloc[0]
+                            tag_equipo_final = equipo_seleccionado_row['tag']
+                            nombre_equipo_final = nom_sel
                     else:
                         st.warning("No hay equipos aquí.")
+
+                # --- ZONA DE EDICIÓN DEL EQUIPO ---
+                if equipo_seleccionado_row is not None:
+                    with st.expander(f"✏️ Editar Equipo: {nombre_equipo_final}"):
+                        st.warning("⚠️ Si cambias el TAG, se actualizarán automáticamente todos los sistemas asociados.")
+                        with st.form("edit_equipo_form"):
+                            c_ed1, c_ed2 = st.columns(2)
+                            # Pre-llenamos con valores actuales
+                            new_edit_tag = c_ed1.text_input("TAG", value=equipo_seleccionado_row['tag']).strip().upper()
+                            new_edit_nom = c_ed2.text_input("Nombre", value=equipo_seleccionado_row['nombre'])
+                            new_edit_tipo = c_ed1.text_input("Tipo", value=equipo_seleccionado_row['tipo'])
+                            
+                            # Manejo seguro del index para el selectbox
+                            crit_options = ["", "Alta", "Media", "Baja"]
+                            curr_crit = equipo_seleccionado_row['criticidad']
+                            idx_crit = crit_options.index(curr_crit) if curr_crit in crit_options else 0
+                            new_edit_crit = c_ed2.selectbox("Criticidad", crit_options, index=idx_crit)
+                            
+                            if st.form_submit_button("💾 Actualizar Equipo"):
+                                # 1. Actualizar datos en DataFrame Equipos
+                                idx_row = equipo_seleccionado_row.name # Índice en pandas
+                                df_equipos.at[idx_row, 'tag'] = new_edit_tag
+                                df_equipos.at[idx_row, 'nombre'] = new_edit_nom
+                                df_equipos.at[idx_row, 'tipo'] = new_edit_tipo
+                                df_equipos.at[idx_row, 'criticidad'] = new_edit_crit
+                                
+                                # 2. ACTUALIZACIÓN EN CASCADA (Si cambió el TAG)
+                                old_tag = equipo_seleccionado_row['tag']
+                                if old_tag != new_edit_tag and not df_sistemas.empty:
+                                    # Buscar hijos (sistemas) y actualizar su link
+                                    df_sistemas.loc[df_sistemas['equipo_tag'] == old_tag, 'equipo_tag'] = new_edit_tag
+                                    save_data(df_sistemas, "sistemas")
+                                    st.info(f"🔗 Se actualizaron los sistemas vinculados al nuevo TAG: {new_edit_tag}")
+
+                                # 3. Guardar cambios en Equipos
+                                save_data(df_equipos, "equipos")
+                                st.success("✅ Equipo actualizado correctamente.")
+                                st.rerun()
 
                 # --- NIVEL 4: SISTEMAS ---
                 if tag_equipo_final:
@@ -181,27 +199,23 @@ def render_gestion_activos():
                                 st.rerun()
                         else:
                             if not df_sistemas.empty:
-                                sistema_id_final = df_sistemas[
-                                    (df_sistemas['equipo_tag'] == tag_equipo_final) & 
-                                    (df_sistemas['nombre'] == sistema_val)
-                                ]['id'].values[0]
+                                sistema_row = df_sistemas[(df_sistemas['equipo_tag'] == tag_equipo_final) & (df_sistemas['nombre'] == sistema_val)]
+                                if not sistema_row.empty:
+                                    sistema_id_final = sistema_row.iloc[0]['id']
 
                         # --- NIVEL 5: COMPONENTES ---
                         if sistema_id_final:
                             st.markdown(f"🔧 **Componentes de: {sistema_val}**")
                             with st.form("add_comp_final"):
                                 c1, c2, c3 = st.columns(3)
-                                # Campos libres
                                 nom_c = c1.text_input("Nombre Componente")
                                 marca = c2.text_input("Marca")
                                 modelo = c3.text_input("Modelo")
                                 
                                 c4, c5 = st.columns(2)
                                 cant = c4.number_input("Cantidad", min_value=1, step=1)
-                                # Categoría libre
-                                cat = c5.text_input("Categoría", placeholder="Ej: Motor, Rodamiento...")
+                                cat = c5.text_input("Categoría", placeholder="Motor, Faja...")
                                 
-                                # Vinculación Stock
                                 df_alm = get_data("almacen")
                                 lista_sku = ["Ninguno"]
                                 if not df_alm.empty:
@@ -227,5 +241,4 @@ def render_gestion_activos():
     # ==========================================
     with tab_masiva:
         st.subheader("Carga Masiva (Excel)")
-        st.info("Sube tu Excel con columnas: Planta, Area, Tag_Equipo, Nombre_Equipo...")
         file = st.file_uploader("Subir Excel", type=["xlsx"])
