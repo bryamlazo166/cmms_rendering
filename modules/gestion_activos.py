@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import json
 from utils.db_con import get_data, save_data
 
 # --- FUNCIÓN HELPER: SELECTOR CON OPCIÓN DE CREAR ---
@@ -10,7 +9,10 @@ def gestionar_filtro_dinamico(label, opciones_existentes, key_suffix):
     Si se selecciona, muestra un campo de texto para escribirlo.
     Retorna: (valor_final, es_nuevo)
     """
-    opciones = sorted(list(set(opciones_existentes)))
+    # Aseguramos que la lista no tenga nulos y sea única
+    opciones_limpias = [x for x in opciones_existentes if pd.notna(x) and x != ""]
+    opciones = sorted(list(set(opciones_limpias)))
+    
     opciones.insert(0, "➕ AGREGAR NUEVO...")
     opciones.insert(0, "Seleccionar...")
     
@@ -30,7 +32,7 @@ def gestionar_filtro_dinamico(label, opciones_existentes, key_suffix):
 # --- VISTA PRINCIPAL ---
 def render_gestion_activos():
     st.header("🏭 Gestión Integral de Activos (Jerarquía)")
-    st.markdown("Planta ➝ Área ➝ Equipo ➝ Sistema ➝ Componente")
+    st.info("Flujo: Planta ➝ Área ➝ Equipo ➝ Sistema ➝ Componente")
 
     tab_manual, tab_masiva = st.tabs(["👆 Carga Manual (Cascada)", "📦 Carga Masiva (Excel)"])
 
@@ -68,7 +70,6 @@ def render_gestion_activos():
                             (df_equipos['area'] == area_val)
                         ]['nombre'].tolist()
                     
-                    # Usamos el helper pero adaptado: Aquí necesitamos TAG también
                     modo_equipo = st.radio("Acción Equipo:", ["Seleccionar Existente", "Crear Nuevo Equipo"], horizontal=True)
                 
                 tag_equipo_final = None
@@ -84,7 +85,6 @@ def render_gestion_activos():
                         
                         if st.button("Guardar Equipo Nivel 3"):
                             if new_tag and new_nom:
-                                # Guardar en DB
                                 new_id = 1 if df_equipos.empty else df_equipos['id'].max() + 1
                                 row = pd.DataFrame([{
                                     "id": new_id, "tag": new_tag, "nombre": new_nom,
@@ -93,17 +93,18 @@ def render_gestion_activos():
                                 }])
                                 save_data(pd.concat([df_equipos, row], ignore_index=True), "equipos")
                                 st.success("Equipo Guardado")
-                                st.rerun()
+                                st.rerun() # Recargar para que aparezca
                 else:
                     # Seleccionar existente
                     if eqs_exist:
                         with col_eq2:
                             nom_sel = st.selectbox("Equipo Existente", eqs_exist)
                             # Buscar el TAG de ese nombre
-                            datos_eq = df_equipos[(df_equipos['nombre'] == nom_sel) & (df_equipos['area'] == area_val)].iloc[0]
-                            tag_equipo_final = datos_eq['tag']
-                            nombre_equipo_final = nom_sel
-                            st.caption(f"TAG Seleccionado: **{tag_equipo_final}**")
+                            datos_eq = df_equipos[(df_equipos['nombre'] == nom_sel) & (df_equipos['area'] == area_val)]
+                            if not datos_eq.empty:
+                                tag_equipo_final = datos_eq.iloc[0]['tag']
+                                nombre_equipo_final = nom_sel
+                                st.caption(f"TAG Seleccionado: **{tag_equipo_final}**")
                     else:
                         st.warning("No hay equipos en esta área. Crea uno nuevo.")
 
@@ -119,7 +120,6 @@ def render_gestion_activos():
                     
                     sistema_val, es_nuevo_sys = gestionar_filtro_dinamico("Sistema", sistemas_exist, "sistema")
                     
-                    # Lógica de guardado automático de sistema si es nuevo
                     sistema_id_final = None
                     
                     if sistema_val:
@@ -136,10 +136,14 @@ def render_gestion_activos():
                                 st.rerun()
                         else:
                             # Recuperar ID del sistema existente
-                            sistema_id_final = df_sistemas[
-                                (df_sistemas['equipo_tag'] == tag_equipo_final) & 
-                                (df_sistemas['nombre'] == sistema_val)
-                            ]['id'].values[0]
+                            if not df_sistemas.empty:
+                                try:
+                                    sistema_id_final = df_sistemas[
+                                        (df_sistemas['equipo_tag'] == tag_equipo_final) & 
+                                        (df_sistemas['nombre'] == sistema_val)
+                                    ]['id'].values[0]
+                                except:
+                                    st.error("Error recuperando ID del sistema.")
 
                         # --- NIVEL 5: COMPONENTES (Solo si hay sistema ID) ---
                         if sistema_id_final:
@@ -189,43 +193,4 @@ def render_gestion_activos():
         file = st.file_uploader("Subir Excel", type=["xlsx"])
         
         if file and st.button("Procesar Estructura Completa"):
-            try:
-                df_upload = pd.read_excel(file)
-                # Normalizar columnas
-                df_upload.columns = [c.strip() for c in df_upload.columns]
-                
-                # 1. Procesar Equipos (Planta/Area/Equipo)
-                df_eq_actual = get_data("equipos")
-                # Crear IDs únicos para lo nuevo
-                start_id_eq = 1 if df_eq_actual.empty else df_eq_actual['id'].max() + 1
-                
-                # Iterar y crear (simplificado para el ejemplo)
-                # En producción se usaría lógica vectorial para velocidad
-                progreso = st.progress(0)
-                
-                for idx, row in df_upload.iterrows():
-                    # Lógica simplificada: Insertar Equipo si no existe TAG
-                    if df_eq_actual.empty or row['Tag_Equipo'] not in df_eq_actual['tag'].values:
-                        new_eq = {
-                            "id": start_id_eq,
-                            "tag": row['Tag_Equipo'],
-                            "nombre": row['Nombre_Equipo'],
-                            "planta": row['Planta'],
-                            "area": row['Area'],
-                            "tipo": "Carga Masiva", "criticidad": "Media", "estado": "Operativo"
-                        }
-                        df_eq_actual = pd.concat([df_eq_actual, pd.DataFrame([new_eq])], ignore_index=True)
-                        start_id_eq += 1
-                    
-                    # Lógica similar para Sistemas y Componentes...
-                    # (Aquí iría el código para buscar el ID del equipo recién creado 
-                    # y crear el sistema vinculado, y luego el componente)
-                    
-                    progreso.progress((idx + 1) / len(df_upload))
-                
-                # Guardar cambios finales en equipos
-                save_data(df_eq_actual, "equipos")
-                st.success("Carga de Equipos base completada. (Lógica completa requiere mapeo de IDs)")
-                
-            except Exception as e:
-                st.error(f"Error: {e}")
+            st.info("Funcionalidad en construcción: Requiere mapeo avanzado de IDs.")
