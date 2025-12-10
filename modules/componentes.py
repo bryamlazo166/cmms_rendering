@@ -21,10 +21,23 @@ def render_componentes_view():
     
     col_izq, col_der = st.columns([1, 1])
     
-    with col_izq:
-        nombre_comp = st.text_input("Nombre Componente", placeholder="Ej: Motor Principal")
-        categoria = st.selectbox("Categoría", ["Motor Electrico", "Motoreductor", "Transmision (Fajas)", "Rodamiento / Chumacera"])
-        sku = st.text_input("SKU Repuesto", placeholder="Ej: ROD-6302-ZZ")
+    # --- CAMBIO AQUÍ: LEER DEL ALMACÉN ---
+        # Antes era: sku = st.text_input(...)
+        
+        # Ahora traemos la data del almacén
+        df_almacen = get_data("almacen")
+        lista_repuestos = ["Ninguno"]
+        
+        if not df_almacen.empty:
+            # Creamos una lista bonita tipo: "ROD-6205 | Rodamiento SKF"
+            df_almacen['display'] = df_almacen['sku'] + " | " + df_almacen['descripcion']
+            lista_repuestos += df_almacen['display'].tolist()
+            
+        sku_seleccionado = st.selectbox("Vincular Repuesto (Stock)", lista_repuestos)
+        
+        # Extraemos solo el SKU limpio del string seleccionado
+        sku_final = sku_seleccionado.split(" | ")[0] if "|" in sku_seleccionado else ""
+        # -------------------------------------
 
     # Lógica de Specs (JSON)
     with col_der:
