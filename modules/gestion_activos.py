@@ -10,10 +10,8 @@ COLS_COMPONENTES = ["id", "sistema_id", "nombre", "marca", "modelo", "cantidad",
 
 # --- HELPER: ASEGURAR DATAFRAME ---
 def asegurar_df(df, columnas_base):
-    """Si el DF viene vacío o sin columnas, lo inicializa correctamente."""
     if df.empty or len(df.columns) == 0:
         return pd.DataFrame(columns=columnas_base)
-    # Aseguramos que tenga todas las columnas necesarias, si falta alguna la crea vacía
     for col in columnas_base:
         if col not in df.columns:
             df[col] = None
@@ -21,6 +19,10 @@ def asegurar_df(df, columnas_base):
 
 # --- HELPER: SELECTOR DINÁMICO ---
 def gestionar_filtro_dinamico(label, opciones_existentes, key_suffix):
+    # Aseguramos que opciones_existentes sea una lista válida
+    if opciones_existentes is None:
+        opciones_existentes = []
+        
     opciones_limpias = [x for x in opciones_existentes if pd.notna(x) and x != ""]
     opciones = sorted(list(set(opciones_limpias)))
     opciones.insert(0, "➕ CREAR NUEVO...")
@@ -66,7 +68,6 @@ def render_gestion_activos():
                         equipos = df_eq[(df_eq['planta'] == planta) & (df_eq['area'] == area)]
                         for _, eq in equipos.iterrows():
                             st.markdown(f"&nbsp;&nbsp;&nbsp; 🔹 **{eq['nombre']}** ({eq['tag']})")
-                            # Sistemas
                             if not df_sys.empty:
                                 sistemas = df_sys[df_sys['equipo_tag'] == eq['tag']]
                                 for _, sys in sistemas.iterrows():
@@ -111,18 +112,20 @@ def render_gestion_activos():
                         eq_idx = None
                         
                         if not es_nuevo_eq:
-                            equipo_row = df_eq[(df_eq['nombre'] == equipo_sel) & (df_eq['area'] == area_val)].iloc[0]
-                            def_tag = equipo_row['tag']
-                            def_tipo = equipo_row['tipo']
-                            def_crit = equipo_row['criticidad']
-                            eq_idx = equipo_row.name
-                            tag_equipo = def_tag
+                            try:
+                                equipo_row = df_eq[(df_eq['nombre'] == equipo_sel) & (df_eq['area'] == area_val)].iloc[0]
+                                def_tag = equipo_row['tag']
+                                def_tipo = equipo_row['tipo']
+                                def_crit = equipo_row['criticidad']
+                                eq_idx = equipo_row.name
+                                tag_equipo = def_tag
+                            except IndexError:
+                                st.error("Error cargando datos del equipo.")
 
                         with st.form("form_equipo"):
                             val_tag = st.text_input("TAG", value=def_tag).strip().upper()
                             val_tipo = st.text_input("Tipo", value=def_tipo)
                             opts_crit = ["", "Alta", "Media", "Baja"]
-                            # Manejo seguro de índice
                             idx_crit = 0
                             if def_crit in opts_crit:
                                 idx_crit = opts_crit.index(def_crit)
@@ -131,7 +134,6 @@ def render_gestion_activos():
                             btn_txt = "Guardar Nuevo" if es_nuevo_eq else "Actualizar Datos"
                             if st.form_submit_button(btn_txt):
                                 if es_nuevo_eq:
-                                    # Generación ID seguro
                                     new_id = 1
                                     if not df_eq.empty and 'id' in df_eq and pd.notna(df_eq['id'].max()):
                                         new_id = int(df_eq['id'].max()) + 1
@@ -157,6 +159,11 @@ def render_gestion_activos():
                                     st.success("Actualizado!"); st.rerun()
 
                 # --- NIVEL 4: SISTEMAS ---
+                # Inicializamos variables para evitar NameError
+                sistema_sel = None
+                es_nuevo_sys = False
+                sistema_id = None
+
                 if tag_equipo and not es_nuevo_eq:
                     st.divider()
                     col_sys1, col_sys2 = st.columns(2)
@@ -169,8 +176,6 @@ def render_gestion_activos():
                         
                         sistema_sel, es_nuevo_sys = gestionar_filtro_dinamico("Sistema", sys_exist, "sistema")
                     
-                    sistema_id = None
-                    
                     if sistema_sel:
                         with col_sys2:
                             st.markdown(f"**{'🆕 Nuevo Sistema' if es_nuevo_sys else '✏️ Editar Sistema'}**")
@@ -179,10 +184,13 @@ def render_gestion_activos():
                             sys_idx = None
                             
                             if not es_nuevo_sys and not df_sys.empty:
-                                sys_row = df_sys[(df_sys['equipo_tag'] == tag_equipo) & (df_sys['nombre'] == sistema_sel)].iloc[0]
-                                sys_desc_def = sys_row['descripcion']
-                                sistema_id = sys_row['id']
-                                sys_idx = sys_row.name
+                                try:
+                                    sys_row = df_sys[(df_sys['equipo_tag'] == tag_equipo) & (df_sys['nombre'] == sistema_sel)].iloc[0]
+                                    sys_desc_def = sys_row['descripcion']
+                                    sistema_id = sys_row['id']
+                                    sys_idx = sys_row.name
+                                except IndexError:
+                                    st.error("Error cargando sistema.")
                             
                             with st.form("form_sistema"):
                                 val_desc = st.text_input("Descripción", value=sys_desc_def)
@@ -209,4 +217,56 @@ def render_gestion_activos():
                         st.divider()
                         st.markdown(f"🔧 **Componentes de: {sistema_sel}**")
                         
-                        comp_exist
+                        # Inicialización explícita para evitar NameError
+                        comp_exist = []
+                        if not df_comp.empty:
+                            comp_exist = df_comp[df_comp['sistema_id'] == sistema_id]['nombre'].tolist()
+                        
+                        comp_sel, es_nuevo_comp = gestionar_filtro_dinamico("Componente", comp_exist, "comp")
+                        
+                        if comp_sel:
+                            with st.form("form_comp"):
+                                st.caption(f"{'🆕 CREANDO' if es_nuevo_comp else '✏️ EDITANDO'}: {comp_sel}")
+                                
+                                def_marca, def_mod, def_cant, def_cat = "", "", 1, ""
+                                comp_idx = None
+                                
+                                if not es_nuevo_comp:
+                                    try:
+                                        c_row = df_comp[(df_comp['sistema_id'] == sistema_id) & (df_comp['nombre'] == comp_sel)].iloc[0]
+                                        def_marca = c_row['marca']
+                                        def_mod = c_row['modelo']
+                                        def_cant = int(c_row['cantidad']) if pd.notna(c_row['cantidad']) else 1
+                                        def_cat = c_row['categoria']
+                                        comp_idx = c_row.name
+                                    except IndexError:
+                                        st.warning("Datos de componente incompletos.")
+
+                                c1, c2 = st.columns(2)
+                                v_marca = c1.text_input("Marca", value=def_marca)
+                                v_mod = c2.text_input("Modelo", value=def_mod)
+                                
+                                c3, c4 = st.columns(2)
+                                v_cant = c3.number_input("Cantidad", min_value=1, value=def_cant)
+                                v_cat = c4.text_input("Categoría", value=def_cat)
+
+                                if st.form_submit_button("Guardar Componente"):
+                                    if es_nuevo_comp:
+                                        new_id = 1
+                                        if not df_comp.empty and 'id' in df_comp and pd.notna(df_comp['id'].max()):
+                                            new_id = int(df_comp['id'].max()) + 1
+                                            
+                                        row = pd.DataFrame([{
+                                            "id": new_id, "sistema_id": sistema_id, "nombre": comp_sel,
+                                            "marca": v_marca, "modelo": v_mod, "cantidad": v_cant,
+                                            "categoria": v_cat, "repuesto_sku": "", "specs_json": "{}"
+                                        }])
+                                        save_data(pd.concat([df_comp, row], ignore_index=True), "componentes")
+                                    else:
+                                        df_comp.at[comp_idx, 'marca'] = v_marca
+                                        df_comp.at[comp_idx, 'modelo'] = v_mod
+                                        df_comp.at[comp_idx, 'cantidad'] = v_cant
+                                        df_comp.at[comp_idx, 'categoria'] = v_cat
+                                        save_data(df_comp, "componentes")
+                                    
+                                    st.success("Guardado!"); st.rerun()
