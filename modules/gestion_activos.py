@@ -21,6 +21,7 @@ def limpiar_id(serie):
     return serie.astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
 
 def gestionar_filtro_dinamico(label, opciones_existentes, key_suffix):
+    # 1. Preparar lista de opciones
     if opciones_existentes is None: opciones_existentes = []
     opciones_limpias = [str(x) for x in opciones_existentes if pd.notna(x) and str(x) != ""]
     opciones = sorted(list(set(opciones_limpias)))
@@ -28,7 +29,11 @@ def gestionar_filtro_dinamico(label, opciones_existentes, key_suffix):
     opciones.insert(0, "➕ CREAR NUEVO...")
     opciones.insert(0, "Seleccionar...")
     
-    seleccion = st.selectbox(f"Seleccione {label}", opciones, key=f"sel_{key_suffix}")
+    # 2. Definir Key única para memoria
+    key_widget = f"sel_{key_suffix}"
+    
+    # 3. Renderizar Selectbox
+    seleccion = st.selectbox(f"Seleccione {label}", opciones, key=key_widget)
     
     valor_final = None
     es_nuevo = False
@@ -41,92 +46,68 @@ def gestionar_filtro_dinamico(label, opciones_existentes, key_suffix):
         
     return valor_final, es_nuevo
 
-# --- ESPECIFICACIONES TÉCNICAS DETALLADAS ---
+# --- ESPECIFICACIONES TÉCNICAS (CON TUS DETALLES) ---
 def render_specs_dinamicas(categoria, valores_actuales={}):
-    """
-    Genera inputs específicos dependiendo de la categoría seleccionada.
-    """
     specs = {}
     st.markdown("---")
     st.markdown(f"⚙️ **Ficha Técnica: {categoria}**")
-    
     cat_upper = str(categoria).upper()
     
-    # === CASO 1: MOTOR ELÉCTRICO SOLO ===
+    # MOTOR
     if "MOTOR" in cat_upper and "REDUCTOR" not in cat_upper:
-        st.caption("Datos Eléctricos & Mecánicos del Motor")
         c1, c2, c3 = st.columns(3)
         specs["potencia_hp"] = c1.text_input("Potencia (HP)", value=valores_actuales.get("potencia_hp", ""))
         specs["rpm_motor"] = c2.text_input("RPM Motor", value=valores_actuales.get("rpm_motor", ""))
         specs["voltaje"] = c3.text_input("Voltaje (V)", value=valores_actuales.get("voltaje", ""))
-        
-        c4, c5, c6 = st.columns(3)
-        specs["corriente_nom"] = c4.text_input("Corriente Nominal (A)", value=valores_actuales.get("corriente_nom", ""))
-        specs["corriente_max"] = c5.text_input("Corriente Máxima (A)", value=valores_actuales.get("corriente_max", ""))
-        specs["factor_servicio"] = c6.text_input("Factor Servicio (F.S.)", value=valores_actuales.get("factor_servicio", ""))
-
-        c7, c8 = st.columns(2)
-        specs["carcasa"] = c7.text_input("Tipo Carcasa (Frame)", value=valores_actuales.get("carcasa", ""))
-        specs["diametro_eje"] = c8.text_input("Diámetro Eje (mm/in)", value=valores_actuales.get("diametro_eje", ""))
-
-    # === CASO 2: MOTOREDUCTOR (MOTOR + CAJA) ===
-    elif "REDUCTOR" in cat_upper or "MOTOREDUCTOR" in cat_upper:
-        # PARTE A: DATOS DEL MOTOR (Los mismos de arriba)
-        st.markdown("⚡ **Datos del Motor (Entrada)**")
-        c1, c2, c3 = st.columns(3)
-        specs["potencia_hp"] = c1.text_input("Potencia Motor (HP)", value=valores_actuales.get("potencia_hp", ""))
-        specs["rpm_motor"] = c2.text_input("RPM Motor", value=valores_actuales.get("rpm_motor", ""))
-        specs["voltaje"] = c3.text_input("Voltaje (V)", value=valores_actuales.get("voltaje", ""))
-        
         c4, c5, c6 = st.columns(3)
         specs["corriente_nom"] = c4.text_input("I. Nominal (A)", value=valores_actuales.get("corriente_nom", ""))
         specs["corriente_max"] = c5.text_input("I. Máxima (A)", value=valores_actuales.get("corriente_max", ""))
-        specs["factor_servicio"] = c6.text_input("F.S.", value=valores_actuales.get("factor_servicio", ""))
-        
+        specs["factor_servicio"] = c6.text_input("Factor Servicio", value=valores_actuales.get("factor_servicio", ""))
         c7, c8 = st.columns(2)
-        specs["carcasa"] = c7.text_input("Carcasa Motor", value=valores_actuales.get("carcasa", ""))
-        
-        st.markdown("⚙️ **Datos de la Caja Reductora (Salida)**")
-        c9, c10 = st.columns(2)
-        specs["ratio"] = c9.text_input("Relación Reducción (i)", value=valores_actuales.get("ratio", ""))
-        specs["rpm_salida"] = c10.text_input("Velocidad Salida (RPM)", value=valores_actuales.get("rpm_salida", ""))
-        
-        c11, c12, c13 = st.columns(3)
-        specs["torque_nom"] = c11.text_input("Torque Nominal (Nm)", value=valores_actuales.get("torque_nom", ""))
-        specs["torque_max"] = c12.text_input("Torque Máx Adm. (Nm)", value=valores_actuales.get("torque_max", ""))
-        specs["eje_salida_red"] = c13.text_input("Ø Eje Salida Reductor", value=valores_actuales.get("eje_salida_red", ""))
+        specs["carcasa"] = c7.text_input("Frame / Carcasa", value=valores_actuales.get("carcasa", ""))
+        specs["diametro_eje"] = c8.text_input("Diámetro Eje", value=valores_actuales.get("diametro_eje", ""))
 
-    # === CASO 3: RODAMIENTOS ===
+    # MOTOREDUCTOR
+    elif "REDUCTOR" in cat_upper or "MOTOREDUCTOR" in cat_upper:
+        st.caption("⚡ Datos Motor")
+        c1, c2, c3 = st.columns(3)
+        specs["potencia_hp"] = c1.text_input("Potencia (HP)", value=valores_actuales.get("potencia_hp", ""))
+        specs["voltaje"] = c2.text_input("Voltaje (V)", value=valores_actuales.get("voltaje", ""))
+        specs["rpm_motor"] = c3.text_input("RPM Entrada", value=valores_actuales.get("rpm_motor", ""))
+        st.caption("⚙️ Datos Reductor")
+        c4, c5 = st.columns(2)
+        specs["ratio"] = c4.text_input("Relación (Ratio)", value=valores_actuales.get("ratio", ""))
+        specs["rpm_salida"] = c5.text_input("RPM Salida", value=valores_actuales.get("rpm_salida", ""))
+        c6, c7, c8 = st.columns(3)
+        specs["torque_nom"] = c6.text_input("Torque Nom. (Nm)", value=valores_actuales.get("torque_nom", ""))
+        specs["torque_max"] = c7.text_input("Torque Máx. (Nm)", value=valores_actuales.get("torque_max", ""))
+        specs["eje_salida"] = c8.text_input("Ø Eje Salida", value=valores_actuales.get("eje_salida", ""))
+
+    # RODAMIENTO
     elif "RODAMIENTO" in cat_upper or "CHUMACERA" in cat_upper:
         c1, c2 = st.columns(2)
         specs["codigo_iso"] = c1.text_input("Código ISO", value=valores_actuales.get("codigo_iso", ""))
-        specs["tipo_sello"] = c2.selectbox("Tipo Sello", ["Abierto", "ZZ", "2RS"], index=0)
+        specs["tipo_sello"] = c2.selectbox("Sello", ["Abierto", "ZZ", "2RS"], index=0)
 
-    # === CASO 4: FAJAS ===
+    # FAJA
     elif "FAJA" in cat_upper:
         c1, c2 = st.columns(2)
         specs["perfil"] = c1.text_input("Perfil", value=valores_actuales.get("perfil", ""))
         specs["longitud"] = c2.text_input("Longitud", value=valores_actuales.get("longitud", ""))
 
     else:
-        st.caption("Especifique detalles generales:")
-        specs["detalles"] = st.text_area("Detalles", value=valores_actuales.get("detalles", ""))
+        specs["detalles"] = st.text_area("Detalles Generales", value=valores_actuales.get("detalles", ""))
         
     return specs
 
 def render_gestion_activos():
     st.header("🏭 Gestión y Edición de Activos")
     
-    # CSS HACK PARA FORZAR CONTRASTE SI EL CONFIG FALLA
+    # CSS para modo oscuro móvil
     st.markdown("""
     <style>
-    div[data-testid="stExpander"] details summary p {
-        font-weight: bold;
-        font-size: 1.1em;
-    }
-    input {
-        color: black !important;
-    }
+    div[data-testid="stExpander"] details summary p { font-size: 1.1em; font-weight: bold; }
+    input { color: black !important; }
     </style>
     """, unsafe_allow_html=True)
     
@@ -137,7 +118,7 @@ def render_gestion_activos():
     df_sys = asegurar_df(get_data("sistemas"), COLS_SISTEMAS)
     df_comp = asegurar_df(get_data("componentes"), COLS_COMPONENTES)
 
-    # Normalización IDs
+    # Normalización
     if not df_eq.empty: df_eq['tag'] = df_eq['tag'].astype(str).str.strip().str.upper()
     if not df_sys.empty: df_sys['id'] = limpiar_id(df_sys['id']); df_sys['equipo_tag'] = df_sys['equipo_tag'].astype(str).str.strip().str.upper()
     if not df_comp.empty: df_comp['sistema_id'] = limpiar_id(df_comp['sistema_id'])
@@ -163,33 +144,30 @@ def render_gestion_activos():
                                     sistemas = df_sys[df_sys['equipo_tag'] == str(eq['tag'])]
                                     for _, sys in sistemas.iterrows():
                                         st.markdown("---")
-                                        st.markdown(f"#### 🎛️ Sistema: {sys['nombre']}")
+                                        st.markdown(f"#### 🎛️ {sys['nombre']}")
                                         if not df_comp.empty:
                                             comps = df_comp[df_comp['sistema_id'] == str(sys['id'])]
                                             for _, comp in comps.iterrows():
-                                                # Parseamos el JSON para mostrarlo bonito
                                                 specs_txt = ""
                                                 try:
-                                                    specs_dict = json.loads(comp['specs_json'])
-                                                    specs_txt = " | ".join([f"**{k}:** {v}" for k, v in specs_dict.items()])
-                                                except:
-                                                    specs_txt = "Sin detalles."
-
+                                                    s_dict = json.loads(comp['specs_json'])
+                                                    specs_txt = " | ".join([f"**{k}:** {v}" for k, v in s_dict.items()])
+                                                except: specs_txt = ""
                                                 st.markdown(f"""
                                                 <div style="background-color: #262730; padding: 10px; border-radius: 5px; margin-top: 5px; border-left: 4px solid #ff4b4b; color: white;">
                                                     <strong>🔧 {comp['nombre']}</strong> <small>({comp['categoria']})</small><br>
-                                                    Marca: {comp['marca']} | Mod: {comp['modelo']}<br>
-                                                    <span style="color: #ddd; font-size: 0.9em;">⚙️ {specs_txt}</span>
+                                                    Marca: {comp['marca']} | Mod: {comp['modelo']} | SKU: {comp['repuesto_sku']}<br>
+                                                    <span style="color: #ddd; font-size: 0.85em;">{specs_txt}</span>
                                                 </div>
                                                 """, unsafe_allow_html=True)
 
     # ==========================================
-    # TAB 2: GESTIÓN Y EDICIÓN
+    # TAB 2: GESTIÓN (CON MEMORIA DE SESIÓN)
     # ==========================================
     with tab_manual:
         st.markdown("##### Navegación por Niveles")
         
-        # Nivel 1 y 2
+        # Nivel 1 & 2
         plantas_exist = df_eq['planta'].unique().tolist() if not df_eq.empty else []
         planta_val, _ = gestionar_filtro_dinamico("Planta", plantas_exist, "planta")
         
@@ -216,9 +194,7 @@ def render_gestion_activos():
                 if equipo_sel:
                     with col_eq2:
                         st.markdown(f"**{'🆕 Nuevo' if es_nuevo_eq else '✏️ Editar'} Equipo**")
-                        def_tag, def_tipo, def_crit = "", "", ""
-                        eq_idx = None
-                        
+                        def_tag = ""; def_tipo = ""; def_crit = ""; eq_idx = None
                         if not es_nuevo_eq:
                             try:
                                 equipo_row = df_eq[(df_eq['nombre'] == equipo_sel) & (df_eq['area'] == area_val)].iloc[0]
@@ -242,13 +218,17 @@ def render_gestion_activos():
                                          except: new_id = len(df_eq) + 1
                                     row = pd.DataFrame([{"id": new_id, "tag": val_tag, "nombre": equipo_sel, "planta": planta_val, "area": area_val, "tipo": val_tipo, "criticidad": val_crit, "estado": "Operativo"}])
                                     save_data(pd.concat([df_eq, row], ignore_index=True), "equipos")
+                                    
+                                    # --- TRUCO DE MEMORIA: Forzar selección del nuevo item ---
+                                    st.session_state['sel_equipo'] = equipo_sel 
                                     st.success("Creado!"); st.rerun()
                                 else:
                                     df_eq.at[eq_idx, 'tag'] = val_tag; df_eq.at[eq_idx, 'tipo'] = val_tipo; df_eq.at[eq_idx, 'criticidad'] = val_crit
                                     if tag_equipo != val_tag and not df_sys.empty:
                                         df_sys.loc[df_sys['equipo_tag'] == str(tag_equipo), 'equipo_tag'] = val_tag
                                         save_data(df_sys, "sistemas")
-                                    save_data(df_eq, "equipos"); st.success("Actualizado!"); st.rerun()
+                                    save_data(df_eq, "equipos")
+                                    st.success("Actualizado!"); st.rerun()
 
                 # Nivel 4: Sistema
                 sistema_sel = None; es_nuevo_sys = False; sistema_id = None
@@ -279,84 +259,4 @@ def render_gestion_activos():
                                     if es_nuevo_sys:
                                         new_id = 1
                                         if not df_sys.empty:
-                                            try: new_id = int(pd.to_numeric(df_sys['id']).max()) + 1
-                                            except: new_id = len(df_sys) + 1
-                                        row = pd.DataFrame([{
-                                            "id": new_id, "equipo_tag": tag_equipo, "nombre": sistema_sel, "descripcion": val_desc
-                                        }])
-                                        save_data(pd.concat([df_sys, row], ignore_index=True), "sistemas")
-                                        st.success("Creado!"); st.rerun()
-                                    else:
-                                        df_sys.at[sys_idx, 'descripcion'] = val_desc
-                                        save_data(df_sys, "sistemas"); st.success("Actualizado!"); st.rerun()
-
-                    # Nivel 5: Componente
-                    if sistema_id:
-                        st.divider()
-                        st.markdown(f"🔧 **Componentes de: {sistema_sel}**")
-                        comp_exist = []
-                        if not df_comp.empty:
-                            sys_id_clean = limpiar_id(pd.Series([sistema_id]))[0]
-                            mask_comp = limpiar_id(df_comp['sistema_id']) == sys_id_clean
-                            comp_exist = df_comp[mask_comp]['nombre'].tolist()
-                        
-                        comp_sel, es_nuevo_comp = gestionar_filtro_dinamico("Componente", comp_exist, "comp")
-                        
-                        if comp_sel:
-                            with st.form("form_comp"):
-                                st.caption(f"{'🆕 CREANDO' if es_nuevo_comp else '✏️ EDITANDO'}: {comp_sel}")
-                                
-                                def_marca = ""; def_mod = ""; def_cant = 1; def_cat = ""; def_specs = {}
-                                comp_idx = None
-                                
-                                if not es_nuevo_comp:
-                                    try:
-                                        sys_id_clean = limpiar_id(pd.Series([sistema_id]))[0]
-                                        mask_c = (limpiar_id(df_comp['sistema_id']) == sys_id_clean) & (df_comp['nombre'] == comp_sel)
-                                        c_row = df_comp[mask_c].iloc[0]
-                                        def_marca = c_row['marca']; def_mod = c_row['modelo']
-                                        def_cant = int(c_row['cantidad']) if pd.notna(c_row['cantidad']) else 1
-                                        def_cat = c_row['categoria']
-                                        if c_row['specs_json']: def_specs = json.loads(c_row['specs_json'])
-                                        comp_idx = c_row.name
-                                    except: pass
-
-                                c1, c2 = st.columns(2)
-                                v_marca = c1.text_input("Marca", value=def_marca)
-                                v_mod = c2.text_input("Modelo", value=def_mod)
-                                c3, c4 = st.columns(2)
-                                v_cant = c3.number_input("Cantidad", min_value=1, value=def_cant)
-                                
-                                # Selector Categoría (Con Motoreductor incluido)
-                                cats = ["Motor Eléctrico", "Motoreductor", "Rodamiento", "Faja", "Bomba"]
-                                idx_cat = cats.index(def_cat) if def_cat in cats else 0
-                                v_cat = c4.selectbox("Categoría", cats, index=idx_cat)
-
-                                # SPECS DINÁMICAS
-                                specs_finales = render_specs_dinamicas(v_cat, def_specs)
-
-                                if st.form_submit_button("Guardar Componente"):
-                                    specs_str = json.dumps(specs_finales)
-                                    if es_nuevo_comp:
-                                        new_id = 1
-                                        if not df_comp.empty:
-                                            try: new_id = int(pd.to_numeric(df_comp['id']).max()) + 1
-                                            except: new_id = len(df_comp) + 1
-                                        row = pd.DataFrame([{
-                                            "id": new_id, "sistema_id": sistema_id, "nombre": comp_sel,
-                                            "marca": v_marca, "modelo": v_mod, "cantidad": v_cant,
-                                            "categoria": v_cat, "repuesto_sku": "", "specs_json": specs_str
-                                        }])
-                                        save_data(pd.concat([df_comp, row], ignore_index=True), "componentes")
-                                    else:
-                                        df_comp.at[comp_idx, 'marca'] = v_marca
-                                        df_comp.at[comp_idx, 'modelo'] = v_mod
-                                        df_comp.at[comp_idx, 'cantidad'] = v_cant
-                                        df_comp.at[comp_idx, 'categoria'] = v_cat
-                                        df_comp.at[comp_idx, 'specs_json'] = specs_str
-                                        save_data(df_comp, "componentes")
-                                    st.success("Guardado!"); st.rerun()
-
-    with tab_masiva:
-        st.info("Carga masiva disponible.")
-        file = st.file_uploader("Subir Excel", type=["xlsx"])
+                                            try: new_id = int(pd.to_numeric(df_
