@@ -8,8 +8,7 @@ COLS_EQUIPOS = ["id", "tag", "nombre", "planta", "area", "tipo", "criticidad", "
 COLS_SISTEMAS = ["id", "equipo_tag", "nombre", "descripcion"]
 COLS_COMPONENTES = ["id", "sistema_id", "nombre", "marca", "modelo", "cantidad", "categoria", "repuesto_sku", "specs_json"]
 
-# --- ESTANDARIZACIÓN: LISTA MAESTRA DE CATEGORÍAS ---
-# Esto garantiza que nadie invente categorías nuevas (ej: "Fajita" vs "Faja")
+# --- LISTA MAESTRA ---
 CATEGORIAS_STD = [
     "Motor Eléctrico",
     "Motoreductor (Caja+Motor)",
@@ -48,7 +47,6 @@ def formatear_specs_html(json_str):
         items = []
         for k, v in data.items():
             if v and str(v).lower() != 'nan':
-                # Convertimos keys feos "potencia_hp" a "Potencia Hp" visualmente
                 key_nice = k.replace("_", " ").title()
                 items.append(f"• <b>{key_nice}:</b> {v}")
         
@@ -83,19 +81,16 @@ def gestionar_filtro_dinamico(label, opciones_existentes, key_suffix):
         
     return valor_final, es_nuevo
 
-# --- RENDERIZADO DE SPECS ESTANDARIZADAS ---
 def render_specs_dinamicas(categoria, valores_actuales={}):
     specs = {}
     st.markdown("---")
     st.caption(f"⚙️ Plantilla de Datos: {categoria}")
     
-    # Usamos la lista maestra para decidir qué campos mostrar
-    
     if categoria == "Motor Eléctrico":
         c1, c2, c3 = st.columns(3)
         specs["potencia_hp"] = c1.text_input("Potencia (HP)", value=valores_actuales.get("potencia_hp", ""))
         specs["rpm"] = c2.text_input("RPM", value=valores_actuales.get("rpm", ""))
-        specs["voltaje"] = c3.selectbox("Voltaje", ["220V", "380V", "440V", "Medium"], index=0) # Estandarizado
+        specs["voltaje"] = c3.selectbox("Voltaje", ["220V", "380V", "440V", "Medium"], index=0)
         
         c4, c5, c6 = st.columns(3)
         specs["corriente_nom"] = c4.text_input("Amperaje Nom. (A)", value=valores_actuales.get("corriente_nom", ""))
@@ -134,9 +129,9 @@ def render_specs_dinamicas(categoria, valores_actuales={}):
     elif categoria == "Rodamiento / Chumacera":
         c1, c2 = st.columns(2)
         specs["codigo_iso"] = c1.text_input("Código ISO", value=valores_actuales.get("codigo_iso", ""))
-        specs["tipo_sello"] = c2.selectbox("Sello", ["Abierto", "ZZ (Metálico)", "2RS (Goma)", "Laberinto"], index=0)
+        specs["tipo_sello"] = c2.selectbox("Sello", ["Abierto", "ZZ", "2RS", "Laberinto"], index=0)
         c3, c4 = st.columns(2)
-        specs["tipo_alojamiento"] = c3.selectbox("Alojamiento", ["Pillow Block", "Flange (Brida)", "Tensor", "Sin Alojamiento"], index=0)
+        specs["tipo_alojamiento"] = c3.selectbox("Alojamiento", ["Pillow Block", "Flange", "Tensor", "Sin"], index=0)
         specs["grasera"] = c4.checkbox("Con Grasera", value=valores_actuales.get("grasera", False))
 
     elif categoria == "Faja / Correa de Transmisión":
@@ -162,9 +157,7 @@ def render_gestion_activos():
     
     st.markdown("""
     <style>
-    .component-card {
-        background-color: #262730; border: 1px solid #363945; border-radius: 8px; padding: 15px; margin-top: 10px; border-left: 5px solid #FF4B4B;
-    }
+    .component-card { background-color: #262730; border: 1px solid #363945; border-radius: 8px; padding: 15px; margin-top: 10px; border-left: 5px solid #FF4B4B; }
     .comp-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
     .comp-title { font-weight: bold; font-size: 1.05em; color: #fff; }
     .comp-badge { background-color: #FF4B4B; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.8em; }
@@ -185,9 +178,7 @@ def render_gestion_activos():
     if not df_sys.empty: df_sys['id'] = limpiar_id(df_sys['id']); df_sys['equipo_tag'] = df_sys['equipo_tag'].astype(str).str.strip().str.upper()
     if not df_comp.empty: df_comp['sistema_id'] = limpiar_id(df_comp['sistema_id'])
 
-    # ==========================================
-    # TAB 1: VISUALIZACIÓN DEL ÁRBOL
-    # ==========================================
+    # === TAB 1: ÁRBOL ===
     with tab_arbol:
         if df_eq.empty:
             st.info("Base de datos vacía.")
@@ -235,9 +226,7 @@ def render_gestion_activos():
                                         else: st.caption("🚫 Sin componentes.")
                                         st.markdown("<br>", unsafe_allow_html=True)
 
-    # ==========================================
-    # TAB 2: GESTIÓN MANUAL
-    # ==========================================
+    # === TAB 2: GESTIÓN ===
     with tab_manual:
         plantas_exist = df_eq['planta'].unique().tolist() if not df_eq.empty else []
         planta_val, _ = gestionar_filtro_dinamico("Planta", plantas_exist, "planta")
@@ -336,36 +325,75 @@ def render_gestion_activos():
                         
                         if comp_sel:
                             with col_comp2:
-                                with st.form("form_comp"):
-                                    st.caption(f"{'🆕 CREANDO' if es_nuevo_comp else '✏️ EDITANDO'}: {comp_sel}")
-                                    
-                                    def_marca = ""; def_mod = ""; def_cant = 1; def_cat = "Otro / General"; def_specs = {}
-                                    comp_idx = None
-                                    
-                                    if not es_nuevo_comp:
-                                        try:
-                                            sys_id_clean = limpiar_id(pd.Series([sistema_id]))[0]
-                                            mask_c = (limpiar_id(df_comp['sistema_id']) == sys_id_clean) & (df_comp['nombre'] == comp_sel)
-                                            c_row = df_comp[mask_c].iloc[0]
-                                            def_marca = c_row['marca']; def_mod = c_row['modelo']
-                                            def_cant = int(c_row['cantidad']) if pd.notna(c_row['cantidad']) else 1
-                                            def_cat = c_row['categoria']
-                                            if c_row['specs_json']: def_specs = json.loads(c_row['specs_json'])
-                                            comp_idx = c_row.name
-                                        except: pass
+                                # LÓGICA CORREGIDA: SELECTOR FUERA DEL FORM
+                                st.caption(f"{'🆕 CREANDO' if es_nuevo_comp else '✏️ EDITANDO'}: {comp_sel}")
+                                
+                                # Carga de datos previos
+                                def_marca = ""; def_mod = ""; def_cant = 1; def_cat = "Otro / General"; def_specs = {}
+                                comp_idx = None
+                                
+                                if not es_nuevo_comp:
+                                    try:
+                                        sys_id_clean = limpiar_id(pd.Series([sistema_id]))[0]
+                                        mask_c = (limpiar_id(df_comp['sistema_id']) == sys_id_clean) & (df_comp['nombre'] == comp_sel)
+                                        c_row = df_comp[mask_c].iloc[0]
+                                        def_marca = c_row['marca']; def_mod = c_row['modelo']
+                                        def_cant = int(c_row['cantidad']) if pd.notna(c_row['cantidad']) else 1
+                                        def_cat = c_row['categoria']
+                                        if c_row['specs_json']: def_specs = json.loads(c_row['specs_json'])
+                                        comp_idx = c_row.name
+                                    except: pass
 
+                                # SELECCIÓN DE CATEGORÍA FUERA DEL FORMULARIO (UX DINÁMICO)
+                                idx_cat = CATEGORIAS_STD.index(def_cat) if def_cat in CATEGORIAS_STD else len(CATEGORIAS_STD)-1
+                                v_cat = st.selectbox("Categoría Estándar", CATEGORIAS_STD, index=idx_cat, key="cat_selector_out")
+
+                                # AHORA EL FORMULARIO
+                                with st.form("form_comp_final"):
                                     c1, c2 = st.columns(2)
                                     v_marca = c1.text_input("Marca", value=def_marca)
                                     v_mod = c2.text_input("Modelo", value=def_mod)
                                     c3, c4 = st.columns(2)
                                     v_cant = c3.number_input("Cantidad", min_value=1, value=def_cant)
                                     
-                                    # SELECTOR ESTANDARIZADO DE CATEGORÍAS
-                                    idx_cat = CATEGORIAS_STD.index(def_cat) if def_cat in CATEGORIAS_STD else len(CATEGORIAS_STD)-1
-                                    v_cat = c4.selectbox("Categoría Estándar", CATEGORIAS_STD, index=idx_cat)
+                                    # Repuestos
+                                    df_alm = get_data("almacen")
+                                    opts_alm = ["Ninguno"]
+                                    if not df_alm.empty:
+                                        opts_alm += (df_alm['sku'] + " | " + df_alm['descripcion']).tolist()
+                                    v_rep = c4.selectbox("Repuesto Vinculado", opts_alm)
 
-                                    # RENDERIZAR CAMPOS SEGÚN CATEGORÍA
+                                    # Specs Dinámicas (Se actualizan porque v_cat está fuera)
                                     specs_finales = render_specs_dinamicas(v_cat, def_specs)
 
-                                    # Repuesto
-                                    df_alm = get_data("almacen")
+                                    # BOTÓN DE ENVÍO OBLIGATORIO DENTRO DEL FORM
+                                    if st.form_submit_button("Guardar Componente"):
+                                        specs_str = json.dumps(specs_finales)
+                                        sku_clean = v_rep.split(" | ")[0] if "|" in v_rep else ""
+                                        
+                                        if es_nuevo_comp:
+                                            new_id = 1
+                                            if not df_comp.empty:
+                                                try: new_id = int(pd.to_numeric(df_comp['id']).max()) + 1
+                                                except: new_id = len(df_comp) + 1
+                                            row = pd.DataFrame([{
+                                                "id": new_id, "sistema_id": sistema_id, "nombre": comp_sel,
+                                                "marca": v_marca, "modelo": v_mod, "cantidad": v_cant,
+                                                "categoria": v_cat, "repuesto_sku": sku_clean, "specs_json": specs_str
+                                            }])
+                                            save_data(pd.concat([df_comp, row], ignore_index=True), "componentes")
+                                            st.session_state['sel_comp'] = comp_sel
+                                            st.success("Guardado!"); st.rerun()
+                                        else:
+                                            df_comp.at[comp_idx, 'marca'] = v_marca
+                                            df_comp.at[comp_idx, 'modelo'] = v_mod
+                                            df_comp.at[comp_idx, 'cantidad'] = v_cant
+                                            df_comp.at[comp_idx, 'categoria'] = v_cat
+                                            df_comp.at[comp_idx, 'repuesto_sku'] = sku_clean
+                                            df_comp.at[comp_idx, 'specs_json'] = specs_str
+                                            save_data(df_comp, "componentes")
+                                            st.success("Actualizado!"); st.rerun()
+
+    with tab_masiva:
+        st.info("Carga masiva disponible.")
+        file = st.file_uploader("Subir Excel", type=["xlsx"])
