@@ -1,13 +1,12 @@
 import streamlit as st
-# Ahora sí funcionará porque existen los 3 archivos
-from modules import gestion_activos, almacen, monitoreo
+from modules import gestion_activos, almacen, monitoreo, configurador
 
 st.set_page_config(page_title="CMMS Rendering", layout="wide", page_icon="🏭")
 st.sidebar.image("https://cdn-icons-png.flaticon.com/512/900/900782.png", width=50)
 st.sidebar.title("CMMS Rendering")
 
-# Menú Principal
-menu = ["Gestión de Activos (Arbol)", "Almacén de Repuestos", "Monitoreo Predictivo"]
+# Menú
+menu = ["Gestión de Activos (Arbol)", "Almacén de Repuestos", "Monitoreo Predictivo", "⚙️ Configuración Familias"]
 opcion = st.sidebar.radio("Ir a:", menu)
 
 if opcion == "Gestión de Activos (Arbol)":
@@ -18,3 +17,6 @@ elif opcion == "Almacén de Repuestos":
 
 elif opcion == "Monitoreo Predictivo":
     monitoreo.render_monitoreo_view()
+
+elif opcion == "⚙️ Configuración Familias":
+    configurador.render_configurador()
