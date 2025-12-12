@@ -3,28 +3,21 @@ import pandas as pd
 import json
 from utils.db_con import get_data, save_data
 
-# --- CONFIGURACIÓN DE ESTRUCTURA (SAP PM STYLE) ---
+# --- CONFIGURACIÓN DE ESTRUCTURA ---
 COLS_EQUIPOS = ["id", "tag", "nombre", "planta", "area", "tipo", "criticidad", "estado"]
 COLS_SISTEMAS = ["id", "equipo_tag", "nombre", "descripcion"]
 COLS_COMPONENTES = ["id", "sistema_id", "nombre", "marca", "modelo", "cantidad", "categoria", "repuesto_sku", "specs_json"]
 
-# --- FUNCIONES AUXILIARES ROBUSTAS ---
+# --- FUNCIONES AUXILIARES ---
 def asegurar_df(df, columnas_base):
-    """
-    Si el DataFrame está vacío o corrupto, lo reconstruye con las columnas correctas.
-    """
     if df is None or df.empty:
         return pd.DataFrame(columns=columnas_base)
-    
-    # Si faltan columnas, las agregamos vacías
     missing_cols = [c for c in columnas_base if c not in df.columns]
     if missing_cols:
-        for c in missing_cols:
-            df[c] = None
+        for c in missing_cols: df[c] = None
     return df
 
 def limpiar_id(serie):
-    """Limpia los IDs numéricos que Excel convierte a 1.0"""
     return serie.astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
 
 def limpiar_dato(dato):
@@ -43,25 +36,36 @@ def formatear_specs_html(json_str):
 
 def gestionar_filtro_dinamico(label, opciones_existentes, key_suffix):
     """
-    Maneja la lógica de 'Seleccionar o Crear' con memoria persistente.
+    Selector inteligente con capacidad de 'Auto-Selección' después de crear.
+    Usa 'force_{suffix}' en session_state para pre-seleccionar items nuevos.
     """
     if opciones_existentes is None: opciones_existentes = []
-    # Limpiamos y ordenamos opciones
     opciones_limpias = sorted(list(set([str(x) for x in opciones_existentes if pd.notna(x) and str(x) != ""])))
     
-    # Agregamos opciones de control
     opciones_limpias.insert(0, "➕ CREAR NUEVO...")
     opciones_limpias.insert(0, "Seleccionar...")
     
-    # Recuperamos selección anterior si existe en memoria
-    key_widget = f"sel_{key_suffix}"
+    key_widget = f"sel_{key_suffix}"     # La llave del widget real
+    key_force = f"force_{key_suffix}"    # La llave para forzar selección
+    
+    # Lógica de índice por defecto
     idx_default = 0
     
-    if key_widget in st.session_state:
-        val_memoria = st.session_state[key_widget]
-        if val_memoria in opciones_limpias:
-            idx_default = opciones_limpias.index(val_memoria)
+    # 1. Prioridad: ¿Hay una orden de forzar selección? (Viene de guardar un nuevo item)
+    if key_force in st.session_state:
+        val_force = st.session_state[key_force]
+        if val_force in opciones_limpias:
+            idx_default = opciones_limpias.index(val_force)
+        # Consumimos la orden para que no se quede pegada
+        del st.session_state[key_force]
+        
+    # 2. Si no hay fuerza, mantenemos la selección actual del usuario si es válida
+    elif key_widget in st.session_state:
+        curr_val = st.session_state[key_widget]
+        if curr_val in opciones_limpias:
+            idx_default = opciones_limpias.index(curr_val)
     
+    # Renderizar widget
     seleccion = st.selectbox(f"Seleccione {label}", opciones_limpias, index=idx_default, key=key_widget)
     
     valor_final = None
@@ -75,23 +79,20 @@ def gestionar_filtro_dinamico(label, opciones_existentes, key_suffix):
         
     return valor_final, es_nuevo
 
-# --- RENDERIZADOR DE CAMPOS DINÁMICOS (LÓGICA MAESTRA) ---
+# --- RENDERIZADOR DE CAMPOS DINÁMICOS ---
 def render_campos_dinamicos(categoria, valores_actuales={}):
     specs = {}
     st.markdown("---")
     
-    # 1. Cargar Configuración desde DB
     df_config = get_data("familias_config")
     campos_definidos = []
     
     if not df_config.empty and "nombre_familia" in df_config.columns:
         row = df_config[df_config["nombre_familia"] == categoria]
         if not row.empty:
-            try:
-                campos_definidos = json.loads(row.iloc[0]["config_json"])
+            try: campos_definidos = json.loads(row.iloc[0]["config_json"])
             except: pass
     
-    # 2. Renderizar
     if campos_definidos:
         st.caption(f"⚙️ Ficha Técnica: {categoria}")
         cols = st.columns(2)
@@ -102,7 +103,7 @@ def render_campos_dinamicos(categoria, valores_actuales={}):
             val_previo = valores_actuales.get(nombre, "")
             specs[nombre] = cols[i % 2].text_input(label_full, value=val_previo)
     else:
-        st.info(f"La familia '{categoria}' no tiene campos configurados. (Configúralo en 'Maestro de Clases')")
+        st.info(f"Familia '{categoria}' sin configuración. (Ir a 'Maestro de Clases')")
         specs["Observaciones"] = st.text_area("Datos Generales", value=valores_actuales.get("Observaciones", ""))
         
     return specs
@@ -111,7 +112,6 @@ def render_campos_dinamicos(categoria, valores_actuales={}):
 def render_gestion_activos():
     st.header("🏭 Gestión de Activos (Data-Driven)")
     
-    # Estilos CSS (Tema Oscuro)
     st.markdown("""<style>
     .component-card {background-color: #262730; border: 1px solid #444; border-radius: 8px; padding: 10px; margin-top: 5px; border-left: 4px solid #FF4B4B;} 
     input {color: black !important;}
@@ -119,7 +119,7 @@ def render_gestion_activos():
     
     tab_arbol, tab_manual, tab_masiva = st.tabs(["🌳 Visualizar Árbol", "✏️ Gestión & Edición", "📦 Carga Masiva"])
 
-    # Carga Segura de Datos
+    # Carga Segura
     df_eq = asegurar_df(get_data("equipos"), COLS_EQUIPOS)
     df_sys = asegurar_df(get_data("sistemas"), COLS_SISTEMAS)
     df_comp = asegurar_df(get_data("componentes"), COLS_COMPONENTES)
@@ -127,14 +127,14 @@ def render_gestion_activos():
     
     lista_familias = df_fam["nombre_familia"].tolist() if (not df_fam.empty and "nombre_familia" in df_fam.columns) else ["GENERAL"]
 
-    # Normalización IDs (Evita errores de enlace)
+    # Normalización
     if not df_eq.empty: df_eq['tag'] = df_eq['tag'].astype(str).str.strip().str.upper()
     if not df_sys.empty: df_sys['id'] = limpiar_id(df_sys['id']); df_sys['equipo_tag'] = df_sys['equipo_tag'].astype(str).str.strip().str.upper()
     if not df_comp.empty: df_comp['sistema_id'] = limpiar_id(df_comp['sistema_id'])
 
     # === TAB 1: ÁRBOL ===
     with tab_arbol:
-        if df_eq.empty: st.info("El sistema está vacío. Ve a la pestaña 'Gestión & Edición' para crear tu Planta.")
+        if df_eq.empty: st.info("Sistema vacío. Crea tu primer activo en la siguiente pestaña.")
         else:
             for planta in df_eq['planta'].unique():
                 if pd.isna(planta): continue
@@ -152,7 +152,7 @@ def render_gestion_activos():
                                                 specs_html = formatear_specs_html(c['specs_json'])
                                                 st.markdown(f"""<div class="component-card"><strong>🔧 {c['nombre']}</strong> <small>({c['categoria']})</small><br>Marca: {limpiar_dato(c['marca'])} | Mod: {limpiar_dato(c['modelo'])}<br>{specs_html}</div>""", unsafe_allow_html=True)
 
-    # === TAB 2: GESTIÓN (FORMULARIO CASCADA) ===
+    # === TAB 2: GESTIÓN ===
     with tab_manual:
         # NIVEL 1: PLANTA
         plantas_exist = df_eq['planta'].unique().tolist() if not df_eq.empty else []
@@ -174,7 +174,6 @@ def render_gestion_activos():
 
                 equipo_row = None; tag_equipo = None
                 
-                # Si tenemos un nombre de equipo (seleccionado o escrito) mostramos el formulario
                 if equipo_sel:
                     with col_eq2:
                         st.markdown(f"**{'🆕 Nuevo' if es_nuevo_eq else '✏️ Editar'} Equipo**")
@@ -194,8 +193,7 @@ def render_gestion_activos():
                             val_crit = st.selectbox("Criticidad", opts_crit, index=idx_crit)
 
                             if st.form_submit_button("Guardar Equipo"):
-                                if not val_tag:
-                                    st.error("El TAG es obligatorio")
+                                if not val_tag: st.error("Falta TAG")
                                 else:
                                     if es_nuevo_eq:
                                         new_id = 1
@@ -204,14 +202,15 @@ def render_gestion_activos():
                                              except: new_id = len(df_eq) + 1
                                         row = pd.DataFrame([{"id": new_id, "tag": val_tag, "nombre": equipo_sel, "planta": planta_val, "area": area_val, "tipo": val_tipo, "criticidad": val_crit, "estado": "Operativo"}])
                                         save_data(pd.concat([df_eq, row], ignore_index=True), "equipos")
-                                        # ¡MAGIA! Forzamos la memoria para que no se resetee
-                                        st.session_state['sel_equipo'] = equipo_sel 
+                                        
+                                        # --- FIX: FORZAR SELECCIÓN ---
+                                        st.session_state['force_equipo'] = equipo_sel 
                                         st.success("Creado!"); st.rerun()
                                     else:
                                         df_eq.at[eq_idx, 'tag'] = val_tag; df_eq.at[eq_idx, 'tipo'] = val_tipo; df_eq.at[eq_idx, 'criticidad'] = val_crit
                                         save_data(df_eq, "equipos"); st.success("Actualizado!"); st.rerun()
 
-                # NIVEL 4: SISTEMA (Solo si hay equipo TAG guardado)
+                # NIVEL 4: SISTEMA
                 if tag_equipo:
                     st.divider()
                     col_sys1, col_sys2 = st.columns(2)
@@ -241,13 +240,15 @@ def render_gestion_activos():
                                             except: new_id = len(df_sys) + 1
                                         row = pd.DataFrame([{"id": new_id, "equipo_tag": tag_equipo, "nombre": sistema_sel, "descripcion": val_desc}])
                                         save_data(pd.concat([df_sys, row], ignore_index=True), "sistemas")
-                                        st.session_state['sel_sistema'] = sistema_sel
+                                        
+                                        # --- FIX: FORZAR SELECCIÓN ---
+                                        st.session_state['force_sistema'] = sistema_sel
                                         st.success("Creado!"); st.rerun()
                                     else:
                                         df_sys.at[sys_idx, 'descripcion'] = val_desc
                                         save_data(df_sys, "sistemas"); st.success("Actualizado!"); st.rerun()
 
-                    # NIVEL 5: COMPONENTE (Solo si hay sistema ID guardado)
+                    # NIVEL 5: COMPONENTE
                     if sistema_id:
                         st.divider()
                         col_comp1, col_comp2 = st.columns([1, 2])
@@ -260,6 +261,7 @@ def render_gestion_activos():
                             comp_sel, es_nuevo_comp = gestionar_filtro_dinamico("Componente", comp_exist, "comp")
                         
                         if comp_sel:
+                            # Caption
                             st.caption(f"{'🆕 CREANDO' if es_nuevo_comp else '✏️ EDITANDO'}: {comp_sel}")
                             
                             def_marca = ""; def_mod = ""; def_cant = 1; def_cat = lista_familias[0]; def_specs = {}
@@ -276,7 +278,7 @@ def render_gestion_activos():
                                     comp_idx = c_row.name
                                 except: pass
 
-                            # SELECTOR DE CATEGORÍA FUERA DEL FORM
+                            # SELECTOR DE FAMILIA FUERA DEL FORM
                             idx_cat = lista_familias.index(def_cat) if def_cat in lista_familias else 0
                             v_cat = st.selectbox("Familia / Clase", lista_familias, index=idx_cat)
 
@@ -286,14 +288,10 @@ def render_gestion_activos():
                                 v_mod = c2.text_input("Modelo", value=def_mod)
                                 v_cant = st.number_input("Cantidad", min_value=1, value=def_cant)
                                 
-                                # Renderizado Dinámico
                                 specs_finales = render_campos_dinamicos(v_cat, def_specs)
 
-                                # Repuesto
                                 df_alm = get_data("almacen")
-                                opts_alm = ["Ninguno"]
-                                if not df_alm.empty:
-                                    opts_alm += (df_alm['sku'] + " | " + df_alm['descripcion']).tolist()
+                                opts_alm = ["Ninguno"] + (df_alm['sku'] + " | " + df_alm['descripcion']).tolist() if not df_alm.empty else ["Ninguno"]
                                 v_rep = st.selectbox("Repuesto Vinculado", opts_alm)
 
                                 if st.form_submit_button("Guardar Componente"):
@@ -311,7 +309,9 @@ def render_gestion_activos():
                                             "categoria": v_cat, "repuesto_sku": sku_clean, "specs_json": specs_str
                                         }])
                                         save_data(pd.concat([df_comp, row], ignore_index=True), "componentes")
-                                        st.session_state['sel_comp'] = comp_sel
+                                        
+                                        # --- FIX: FORZAR SELECCIÓN ---
+                                        st.session_state['force_comp'] = comp_sel
                                         st.success("Guardado!"); st.rerun()
                                     else:
                                         df_comp.at[comp_idx, 'marca'] = v_marca
@@ -324,5 +324,4 @@ def render_gestion_activos():
                                         st.success("Actualizado!"); st.rerun()
 
     with tab_masiva:
-        st.info("Carga masiva disponible.")
-        file = st.file_uploader("Subir Excel", type=["xlsx"])
+        st.file_uploader("Subir Excel", type=["xlsx"])
