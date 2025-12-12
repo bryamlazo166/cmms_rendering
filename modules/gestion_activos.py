@@ -23,28 +23,24 @@ def limpiar_dato(dato):
     return str(dato)
 
 def formatear_specs_html_ejecutivo(json_str):
-    """Genera una grilla HTML bonita para la vista gerencial."""
     try:
-        if not json_str or json_str == "{}": return "<span style='color:#777; font-style:italic;'>Sin especificaciones técnicas.</span>"
+        if not json_str or json_str == "{}": return "<span style='color:#777; font-style:italic;'>Sin especificaciones.</span>"
         data = json.loads(json_str)
-        
         items_html = ""
         for k, v in data.items():
             if v and str(v).lower() not in ['nan', 'none', '']:
                 key_nice = k.replace("_", " ").title()
                 items_html += f"""
-                <div style="background: rgba(255,255,255,0.05); padding: 4px 8px; border-radius: 4px; margin-bottom: 4px;">
-                    <span style="color: #bbb; font-size: 0.8em; display: block;">{key_nice}</span>
-                    <span style="color: #fff; font-weight: 500; font-size: 0.95em;">{v}</span>
+                <div style="background: rgba(255,255,255,0.05); padding: 4px 8px; border-radius: 4px;">
+                    <span style="color: #bbb; font-size: 0.75em; display: block;">{key_nice}</span>
+                    <span style="color: #fff; font-weight: 500; font-size: 0.9em;">{v}</span>
                 </div>
                 """
-        
-        if not items_html: return "<span style='color:#777;'>Sin datos detallados.</span>"
-        return f"""<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 6px; margin-top: 8px;">{items_html}</div>"""
-    except:
-        return "Error en formato de datos."
+        if not items_html: return "<span style='color:#777;'>Sin datos.</span>"
+        return f"""<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 5px; margin-top: 5px;">{items_html}</div>"""
+    except: return "Error datos."
 
-# --- SELECTOR INTELIGENTE ---
+# --- SELECTOR INTELIGENTE CON MEMORIA ---
 def gestionar_filtro_dinamico(label, opciones_existentes, key_suffix):
     if opciones_existentes is None: opciones_existentes = []
     opciones_limpias = sorted(list(set([str(x) for x in opciones_existentes if pd.notna(x) and str(x) != ""])))
@@ -74,14 +70,11 @@ def gestionar_filtro_dinamico(label, opciones_existentes, key_suffix):
         
     return valor_final, es_nuevo
 
-# --- RENDERIZADOR DE INPUTS DE EDICIÓN (CORREGIDO CON KEYS ÚNICAS) ---
+# --- RENDERIZADOR DE CAMPOS DINÁMICOS ---
 def render_campos_dinamicos(categoria, valores_actuales={}, key_prefix="new"):
-    """
-    Renderiza los inputs dinámicos.
-    IMPORTANTE: key_prefix asegura que los campos de un componente no se mezclen con otro.
-    """
     specs = {}
     st.markdown("---")
+    
     df_config = get_data("familias_config")
     campos_definidos = []
     
@@ -92,70 +85,54 @@ def render_campos_dinamicos(categoria, valores_actuales={}, key_prefix="new"):
             except: pass
     
     if campos_definidos:
-        st.caption(f"⚙️ Datos Técnicos: {categoria}")
+        st.caption(f"⚙️ Ficha Técnica: {categoria}")
         cols = st.columns(2)
         for i, campo in enumerate(campos_definidos):
             nombre = campo['nombre']
             unidad = campo.get('unidad', '')
             label = f"{nombre} ({unidad})" if unidad else nombre
             val = valores_actuales.get(nombre, "")
-            
-            # AQUÍ ESTÁ LA SOLUCIÓN: Creamos un ID único para este input
-            unique_key = f"{key_prefix}_{nombre}_{i}"
-            
+            unique_key = f"{key_prefix}_{nombre}_{i}" # Key única para evitar conflictos
             specs[nombre] = cols[i % 2].text_input(label, value=val, key=unique_key)
     else:
-        st.info(f"Familia '{categoria}' sin campos definidos.")
+        st.info(f"Clase '{categoria}' sin campos configurados.")
         unique_key_obs = f"{key_prefix}_obs"
         specs["Observaciones"] = st.text_area("Detalles", value=valores_actuales.get("Observaciones", ""), key=unique_key_obs)
+        
     return specs
 
 # --- VISTA PRINCIPAL ---
 def render_gestion_activos():
-    st.header("🏭 Gestión de Activos")
+    st.header("🏭 Gestión de Activos (Estandarizada)")
     
-    # CSS PARA VISTA EJECUTIVA
-    st.markdown("""
-    <style>
-    .sys-header {
-        color: #FF4B4B; font-size: 1.1em; font-weight: bold; 
-        margin-top: 15px; margin-bottom: 5px; border-bottom: 1px solid #444; padding-bottom: 5px;
-    }
-    .tech-card {
-        background-color: #1E1E1E; 
-        border: 1px solid #333; 
-        border-left: 4px solid #FF4B4B; 
-        border-radius: 6px; 
-        padding: 12px; 
-        margin-bottom: 10px;
-    }
-    .tech-title { font-size: 1em; font-weight: bold; color: white; display: flex; justify-content: space-between;}
-    .tech-main-data { 
-        display: flex; gap: 15px; margin-bottom: 10px; font-size: 0.9em; color: #ddd; border-bottom: 1px solid #333; padding-bottom: 5px;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+    st.markdown("""<style>
+    .fam-header { color: #aaa; font-size: 0.9em; font-weight: bold; margin-top: 10px; border-bottom: 1px solid #444; text-transform: uppercase; letter-spacing: 1px;}
+    .tech-card { background-color: #1E1E1E; border: 1px solid #333; border-left: 3px solid #FF4B4B; border-radius: 4px; padding: 10px; margin-bottom: 8px; }
+    .tech-title { font-size: 0.95em; font-weight: bold; color: white; display: flex; justify-content: space-between;}
+    .tech-main-data { display: flex; gap: 10px; margin-bottom: 5px; font-size: 0.85em; color: #ddd; border-bottom: 1px solid #333; padding-bottom: 5px; }
+    </style>""", unsafe_allow_html=True)
     
     # Carga de datos
     df_eq = asegurar_df(get_data("equipos"), COLS_EQUIPOS)
     df_sys = asegurar_df(get_data("sistemas"), COLS_SISTEMAS)
     df_comp = asegurar_df(get_data("componentes"), COLS_COMPONENTES)
     df_fam = get_data("familias_config")
-    lista_familias = df_fam["nombre_familia"].tolist() if (not df_fam.empty and "nombre_familia" in df_fam.columns) else ["General"]
+    
+    # Lista Maestra de Familias (Si está vacía, forzamos al menos una)
+    lista_familias = df_fam["nombre_familia"].tolist() if (not df_fam.empty and "nombre_familia" in df_fam.columns) else []
 
     # Normalización IDs
     if not df_eq.empty: df_eq['tag'] = df_eq['tag'].astype(str).str.strip().str.upper()
     if not df_sys.empty: df_sys['id'] = limpiar_id(df_sys['id']); df_sys['equipo_tag'] = df_sys['equipo_tag'].astype(str).str.strip().str.upper()
     if not df_comp.empty: df_comp['sistema_id'] = limpiar_id(df_comp['sistema_id'])
 
-    tab_arbol, tab_manual, tab_masiva = st.tabs(["🌳 Visualizar Planta (Gerencia)", "✏️ Gestión & Edición", "📦 Carga Masiva"])
+    tab_arbol, tab_manual, tab_masiva = st.tabs(["🌳 Visualizar Planta", "✏️ Gestión & Edición", "📦 Carga Masiva"])
 
     # ==========================================
-    # TAB 1: VISUALIZACIÓN EJECUTIVA
+    # TAB 1: VISUALIZACIÓN AGRUPADA POR FAMILIA
     # ==========================================
     with tab_arbol:
-        if df_eq.empty:
-            st.info("Planta sin activos configurados.")
+        if df_eq.empty: st.info("Planta vacía.")
         else:
             plantas = df_eq['planta'].unique()
             planta_sel = st.selectbox("Seleccione Planta:", plantas)
@@ -163,51 +140,54 @@ def render_gestion_activos():
             if planta_sel:
                 areas = df_eq[df_eq['planta'] == planta_sel]['area'].unique()
                 for area in areas:
-                    with st.expander(f"📍 ÁREA: {area}", expanded=False):
+                    with st.expander(f"📍 {area}", expanded=False):
                         equipos_area = df_eq[(df_eq['planta'] == planta_sel) & (df_eq['area'] == area)]
-                        
                         for _, eq in equipos_area.iterrows():
                             st.markdown(f"### 🔹 {eq['nombre']} <span style='font-size:0.7em; color:#888;'>({eq['tag']})</span>", unsafe_allow_html=True)
-                            c1, c2, c3 = st.columns(3)
-                            c1.info(f"**Tipo:** {eq['tipo']}")
-                            c2.warning(f"**Criticidad:** {eq['criticidad']}")
-                            c3.success(f"**Estado:** {eq['estado']}")
                             
                             if not df_sys.empty:
                                 sistemas = df_sys[df_sys['equipo_tag'] == str(eq['tag'])]
                                 for _, sys in sistemas.iterrows():
-                                    st.markdown(f"<div class='sys-header'>🎛️ SISTEMA: {sys['nombre']}</div>", unsafe_allow_html=True)
+                                    st.markdown(f"**🎛️ SISTEMA: {sys['nombre']}**")
+                                    
                                     if not df_comp.empty:
-                                        comps = df_comp[df_comp['sistema_id'] == str(sys['id'])]
-                                        if not comps.empty:
-                                            for _, c in comps.iterrows():
-                                                marca = limpiar_dato(c['marca'])
-                                                modelo = limpiar_dato(c['modelo'])
-                                                sku = limpiar_dato(c['repuesto_sku'])
-                                                html_specs = formatear_specs_html_ejecutivo(c['specs_json'])
+                                        # Agrupar componentes por FAMILIA (Categoría)
+                                        comps_sys = df_comp[df_comp['sistema_id'] == str(sys['id'])]
+                                        
+                                        if not comps_sys.empty:
+                                            # Obtenemos las familias presentes en este sistema
+                                            familias_presentes = comps_sys['categoria'].unique()
+                                            
+                                            for fam in familias_presentes:
+                                                st.markdown(f"<div class='fam-header'>{fam}</div>", unsafe_allow_html=True)
                                                 
-                                                st.markdown(f"""
-                                                <div class="tech-card">
-                                                    <div class="tech-title">
-                                                        <span>🔧 {c['nombre']}</span>
-                                                        <span style="background:#FF4B4B; padding:2px 6px; border-radius:4px; font-size:0.7em;">{c['categoria']}</span>
+                                                # Listar componentes de esa familia
+                                                comps_fam = comps_sys[comps_sys['categoria'] == fam]
+                                                for _, c in comps_fam.iterrows():
+                                                    html_specs = formatear_specs_html_ejecutivo(c['specs_json'])
+                                                    sku_txt = f" | 📦 SKU: {c['repuesto_sku']}" if c['repuesto_sku'] else ""
+                                                    
+                                                    st.markdown(f"""
+                                                    <div class="tech-card">
+                                                        <div class="tech-title">
+                                                            <span>{c['nombre']}</span>
+                                                            <span style="font-size:0.8em; color:#bbb;">Cant: {c['cantidad']}</span>
+                                                        </div>
+                                                        <div class="tech-main-data">
+                                                            <span>🏷️ {limpiar_dato(c['marca'])}</span>
+                                                            <span>#️⃣ {limpiar_dato(c['modelo'])}{sku_txt}</span>
+                                                        </div>
+                                                        {html_specs}
                                                     </div>
-                                                    <div class="tech-main-data">
-                                                        <span>🏷️ <b>Marca:</b> {marca}</span>
-                                                        <span>#️⃣ <b>Mod:</b> {modelo}</span>
-                                                        <span>📦 <b>SKU:</b> {sku}</span>
-                                                        <span>🔢 <b>Cant:</b> {c['cantidad']}</span>
-                                                    </div>
-                                                    <div style="margin-top:5px;">{html_specs}</div>
-                                                </div>
-                                                """, unsafe_allow_html=True)
-                                        else: st.caption("   *Sin componentes.*")
+                                                    """, unsafe_allow_html=True)
+                                        else: st.caption("Sin componentes.")
                             st.markdown("---")
 
     # ==========================================
-    # TAB 2: GESTIÓN DE DATOS
+    # TAB 2: GESTIÓN DE DATOS (NUEVA LÓGICA)
     # ==========================================
     with tab_manual:
+        # --- NIVELES 1-4 (Igual que antes, necesarios para llegar al componente) ---
         c_planta, c_area = st.columns(2)
         p_exist = df_eq['planta'].unique().tolist() if not df_eq.empty else []
         with c_planta: p_val, _ = gestionar_filtro_dinamico("Planta", p_exist, "planta")
@@ -225,7 +205,7 @@ def render_gestion_activos():
                 
                 tag_eq_sel = None
                 if e_sel:
-                    with ce2:
+                    with ce2: # Formulario Equipo
                         st.caption(f"{'🆕 CREANDO' if e_new else '✏️ EDITANDO'}: {e_sel}")
                         def_tag=""; def_typ=""; def_cri="Media"; eq_idx=None
                         if not e_new and not df_eq.empty:
@@ -233,26 +213,23 @@ def render_gestion_activos():
                                 r = df_eq[(df_eq['nombre']==e_sel) & (df_eq['area']==a_val)].iloc[0]
                                 def_tag=r['tag']; def_typ=r['tipo']; def_cri=r['criticidad']; eq_idx=r.name; tag_eq_sel=def_tag
                             except: pass
-                        
                         with st.form("f_eq"):
-                            c_a, c_b, c_c = st.columns(3)
+                            c_a, c_b = st.columns(2)
                             v_tag = c_a.text_input("TAG", value=def_tag).strip().upper()
                             v_typ = c_b.text_input("Tipo", value=def_typ)
-                            v_cri = c_c.selectbox("Criticidad", ["Alta", "Media", "Baja"], index=["Alta", "Media", "Baja"].index(def_cri) if def_cri in ["Alta", "Media", "Baja"] else 1)
                             if st.form_submit_button("Guardar Equipo"):
-                                if not v_tag: st.error("Falta TAG")
+                                if not v_tag: st.error("TAG obligatorio")
                                 else:
                                     if e_new:
                                         nid = 1 if df_eq.empty else (pd.to_numeric(df_eq['id'], errors='coerce').max() or 0) + 1
-                                        row = pd.DataFrame([{"id": nid, "tag": v_tag, "nombre": e_sel, "planta": p_val, "area": a_val, "tipo": v_typ, "criticidad": v_cri, "estado": "Operativo"}])
+                                        row = pd.DataFrame([{"id": nid, "tag": v_tag, "nombre": e_sel, "planta": p_val, "area": a_val, "tipo": v_typ, "criticidad": "Media", "estado": "Operativo"}])
                                         save_data(pd.concat([df_eq, row], ignore_index=True), "equipos")
                                         st.session_state['force_equipo'] = e_sel
                                     else:
-                                        df_eq.at[eq_idx, 'tag'] = v_tag; df_eq.at[eq_idx, 'tipo'] = v_typ; df_eq.at[eq_idx, 'criticidad'] = v_cri
+                                        df_eq.at[eq_idx, 'tag'] = v_tag; df_eq.at[eq_idx, 'tipo'] = v_typ
                                         save_data(df_eq, "equipos")
                                     st.success("Listo!"); st.rerun()
 
-                # Sistema
                 if tag_eq_sel:
                     st.divider()
                     cs1, cs2 = st.columns([1, 2])
@@ -262,7 +239,7 @@ def render_gestion_activos():
                     
                     sys_id_sel = None
                     if s_sel:
-                        with cs2:
+                        with cs2: # Formulario Sistema
                             st.caption(f"{'🆕 CREANDO' if s_new else '✏️ EDITANDO'} SISTEMA")
                             def_desc=""; sys_idx=None
                             if not s_new and not df_sys.empty:
@@ -270,7 +247,6 @@ def render_gestion_activos():
                                     r = df_sys[(df_sys['equipo_tag'].astype(str)==str(tag_eq_sel)) & (df_sys['nombre']==s_sel)].iloc[0]
                                     def_desc=r['descripcion']; sys_id_sel=r['id']; sys_idx=r.name
                                 except: pass
-                            
                             with st.form("f_sys"):
                                 v_desc = st.text_input("Descripción", value=def_desc)
                                 if st.form_submit_button("Guardar Sistema"):
@@ -284,66 +260,80 @@ def render_gestion_activos():
                                         save_data(df_sys, "sistemas")
                                     st.success("Listo!"); st.rerun()
 
-                    # Componente
+                    # --- NIVEL 5: COMPONENTES (LOGICA NUEVA) ---
                     if sys_id_sel:
                         st.divider()
-                        cc1, cc2 = st.columns([1, 2])
-                        with cc1:
-                            c_exist = []
-                            if not df_comp.empty:
-                                clean_sys_id = limpiar_id(pd.Series([sys_id_sel]))[0]
-                                c_exist = df_comp[limpiar_id(df_comp['sistema_id']) == clean_sys_id]['nombre'].tolist()
-                            c_sel, c_new = gestionar_filtro_dinamico("Componente", c_exist, "comp")
                         
-                        if c_sel:
-                            with cc2:
-                                st.caption(f"{'🆕 CREANDO' if c_new else '✏️ EDITANDO'} COMPONENTE")
-                                d_mar=""; d_mod=""; d_cant=1; d_cat=lista_familias[0]; d_specs={}
-                                c_idx=None; c_sku=""
+                        if not lista_familias:
+                            st.error("⚠️ No hay Familias/Clases configuradas. Ve al menú 'Maestro de Clases' primero.")
+                        else:
+                            col_fam, col_comp = st.columns([1, 2])
+                            
+                            # 1. SELECCIONAR LA CLASE/FAMILIA PRIMERO (FILTRO MAESTRO)
+                            with col_fam:
+                                st.markdown("##### 1. Clase / Familia")
+                                fam_sel = st.selectbox("Tipo de Componente", lista_familias, key="fam_selector_main")
+                            
+                            # 2. FILTRAR COMPONENTES DE ESA FAMILIA EN ESTE SISTEMA
+                            with col_comp:
+                                st.markdown(f"##### 2. Identificador ({fam_sel})")
+                                comp_exist_fam = []
+                                clean_sys = limpiar_id(pd.Series([sys_id_sel]))[0]
                                 
-                                if not c_new and not df_comp.empty:
-                                    try:
-                                        clean_sys_id = limpiar_id(pd.Series([sys_id_sel]))[0]
-                                        r = df_comp[(limpiar_id(df_comp['sistema_id'])==clean_sys_id) & (df_comp['nombre']==c_sel)].iloc[0]
-                                        d_mar=r['marca']; d_mod=r['modelo']; d_cant=int(r['cantidad'] or 1); d_cat=r['categoria']; c_sku=r['repuesto_sku']
-                                        if r['specs_json']: d_specs=json.loads(r['specs_json'])
-                                        c_idx=r.name
-                                    except: pass
+                                if not df_comp.empty:
+                                    # Filtramos por Sistema Y por Familia
+                                    mask = (limpiar_id(df_comp['sistema_id']) == clean_sys) & (df_comp['categoria'] == fam_sel)
+                                    comp_exist_fam = df_comp[mask]['nombre'].tolist()
                                 
-                                idx_cat = lista_familias.index(d_cat) if d_cat in lista_familias else 0
-                                v_cat = st.selectbox("Clase / Familia", lista_familias, index=idx_cat, key="cat_main")
+                                c_sel, c_new = gestionar_filtro_dinamico("Identificador / Tag", comp_exist_fam, "comp")
                                 
-                                with st.form("f_comp"):
-                                    col_a, col_b, col_c = st.columns(3)
-                                    v_mar = col_a.text_input("Marca", value=d_mar)
-                                    v_mod = col_b.text_input("Modelo", value=d_mod)
-                                    v_cant = col_c.number_input("Cant", min_value=1, value=d_cant)
-                                    v_sku = st.text_input("SKU / Código Repuesto", value=c_sku)
+                                if c_sel:
+                                    # FORMULARIO
+                                    st.info(f"Editando especificaciones para: **{c_sel}** ({fam_sel})")
                                     
-                                    # --- CLAVE DEL FIX: PASAR UN PREFIJO ÚNICO ---
-                                    # Si estamos editando, usamos el ID del componente (c_idx)
-                                    # Si es nuevo, usamos 'new_comp'
-                                    # Así Streamlit sabe que los campos son únicos para este registro
-                                    prefix_unico = str(c_idx) if c_idx is not None else "new_comp"
-                                    specs_final = render_campos_dinamicos(v_cat, d_specs, key_prefix=prefix_unico)
+                                    # Datos previos
+                                    d_mar=""; d_mod=""; d_cant=1; d_specs={}
+                                    c_idx=None; c_sku=""
                                     
-                                    if st.form_submit_button("Guardar Componente"):
-                                        js_str = json.dumps(specs_final)
+                                    if not c_new and not df_comp.empty:
+                                        try:
+                                            r = df_comp[(limpiar_id(df_comp['sistema_id'])==clean_sys) & (df_comp['nombre']==c_sel) & (df_comp['categoria']==fam_sel)].iloc[0]
+                                            d_mar=r['marca']; d_mod=r['modelo']; d_cant=int(r['cantidad'] or 1); c_sku=r['repuesto_sku']
+                                            if r['specs_json']: d_specs=json.loads(r['specs_json'])
+                                            c_idx=r.name
+                                        except: pass
+                                    
+                                    with st.form("form_comp_final"):
+                                        c1, c2, c3 = st.columns(3)
+                                        v_mar = c1.text_input("Marca", value=d_mar)
+                                        v_mod = c2.text_input("Modelo", value=d_mod)
+                                        v_cant = c3.number_input("Cantidad", min_value=1, value=d_cant)
+                                        v_sku = st.text_input("SKU Repuesto", value=c_sku)
                                         
-                                        if c_new:
-                                            nid = 1 if df_comp.empty else (pd.to_numeric(df_comp['id'], errors='coerce').max() or 0) + 1
-                                            row = pd.DataFrame([{"id": nid, "sistema_id": sys_id_sel, "nombre": c_sel, "marca": v_mar, "modelo": v_mod, "cantidad": v_cant, "categoria": v_cat, "repuesto_sku": v_sku, "specs_json": js_str}])
-                                            save_data(pd.concat([df_comp, row], ignore_index=True), "componentes")
-                                            st.session_state['force_comp'] = c_sel
-                                        else:
-                                            df_comp.at[c_idx, 'marca'] = v_mar
-                                            df_comp.at[c_idx, 'modelo'] = v_mod
-                                            df_comp.at[c_idx, 'cantidad'] = v_cant
-                                            df_comp.at[c_idx, 'categoria'] = v_cat
-                                            df_comp.at[c_idx, 'repuesto_sku'] = v_sku
-                                            df_comp.at[c_idx, 'specs_json'] = js_str
-                                            save_data(df_comp, "componentes")
-                                        st.success("Guardado!"); st.rerun()
+                                        # Renderizar campos de la familia seleccionada arriba
+                                        unique_prefix = str(c_idx) if c_idx is not None else "new"
+                                        specs_final = render_campos_dinamicos(fam_sel, d_specs, key_prefix=unique_prefix)
+                                        
+                                        if st.form_submit_button("💾 Guardar Datos del Componente"):
+                                            js_str = json.dumps(specs_final)
+                                            
+                                            if c_new:
+                                                nid = 1 if df_comp.empty else (pd.to_numeric(df_comp['id'], errors='coerce').max() or 0) + 1
+                                                row = pd.DataFrame([{
+                                                    "id": nid, "sistema_id": sys_id_sel, 
+                                                    "nombre": c_sel, "categoria": fam_sel, # Guardamos la familia aquí
+                                                    "marca": v_mar, "modelo": v_mod, "cantidad": v_cant, "repuesto_sku": v_sku, "specs_json": js_str
+                                                }])
+                                                save_data(pd.concat([df_comp, row], ignore_index=True), "componentes")
+                                                st.session_state['force_comp'] = c_sel
+                                            else:
+                                                df_comp.at[c_idx, 'marca'] = v_mar
+                                                df_comp.at[c_idx, 'modelo'] = v_mod
+                                                df_comp.at[c_idx, 'cantidad'] = v_cant
+                                                df_comp.at[c_idx, 'repuesto_sku'] = v_sku
+                                                df_comp.at[c_idx, 'specs_json'] = js_str
+                                                save_data(df_comp, "componentes")
+                                            st.success("Guardado correctamente."); st.rerun()
 
     with tab_masiva:
         st.file_uploader("Subir Excel", type=["xlsx"])
