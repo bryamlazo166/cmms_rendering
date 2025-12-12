@@ -3,21 +3,24 @@ import pandas as pd
 import json
 from utils.db_con import get_data, save_data
 
-# --- CONFIGURACIÓN DE ESTRUCTURA ---
+# --- CONFIGURACIÓN DE COLUMNAS ---
 COLS_EQUIPOS = ["id", "tag", "nombre", "planta", "area", "tipo", "criticidad", "estado"]
 COLS_SISTEMAS = ["id", "equipo_tag", "nombre", "descripcion"]
 COLS_COMPONENTES = ["id", "sistema_id", "nombre", "marca", "modelo", "cantidad", "categoria", "repuesto_sku", "specs_json"]
 
-# --- FUNCIONES AUXILIARES ---
+# --- FUNCIONES AUXILIARES ROBUSTAS ---
 def asegurar_df(df, columnas_base):
     if df is None or df.empty:
         return pd.DataFrame(columns=columnas_base)
-    missing_cols = [c for c in columnas_base if c not in df.columns]
-    if missing_cols:
-        for c in missing_cols: df[c] = None
+    # Rellenar columnas faltantes
+    for col in columnas_base:
+        if col not in df.columns:
+            df[col] = None
     return df
 
 def limpiar_id(serie):
+    """Convierte IDs a string puro para evitar errores de enlace (1 vs 1.0)"""
+    if serie.empty: return serie
     return serie.astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
 
 def limpiar_dato(dato):
@@ -30,56 +33,60 @@ def formatear_specs_html(json_str):
         data = json.loads(json_str)
         items = [f"• <b>{k.replace('_', ' ').title()}:</b> {v}" for k, v in data.items() if v and str(v).lower() != 'nan']
         if not items: return ""
-        html = '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 5px; font-size: 0.9em; color: #cfcfcf;">' + "".join([f'<span>{i}</span>' for i in items]) + '</div>'
-        return html
+        return '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 5px; font-size: 0.9em; color: #cfcfcf;">' + "".join([f'<span>{i}</span>' for i in items]) + '</div>'
     except: return ""
 
+# --- SELECTOR CON MEMORIA "PEGAJOSA" (CORRECCIÓN CLAVE) ---
 def gestionar_filtro_dinamico(label, opciones_existentes, key_suffix):
     """
-    Selector inteligente con capacidad de 'Auto-Selección' después de crear.
-    Usa 'force_{suffix}' en session_state para pre-seleccionar items nuevos.
+    Gestor de selección que resiste el parpadeo de Streamlit.
     """
     if opciones_existentes is None: opciones_existentes = []
-    opciones_limpias = sorted(list(set([str(x) for x in opciones_existentes if pd.notna(x) and str(x) != ""])))
     
+    # 1. Normalizar lista de opciones
+    opciones_limpias = sorted(list(set([str(x) for x in opciones_existentes if pd.notna(x) and str(x) != ""])))
     opciones_limpias.insert(0, "➕ CREAR NUEVO...")
     opciones_limpias.insert(0, "Seleccionar...")
     
-    key_widget = f"sel_{key_suffix}"     # La llave del widget real
-    key_force = f"force_{key_suffix}"    # La llave para forzar selección
+    key_widget = f"sel_{key_suffix}"     # La llave del widget en memoria
+    key_force = f"force_{key_suffix}"    # La llave de "fuerza" (cuando creamos uno nuevo)
     
-    # Lógica de índice por defecto
+    # 2. Calcular el índice correcto
     idx_default = 0
     
-    # 1. Prioridad: ¿Hay una orden de forzar selección? (Viene de guardar un nuevo item)
+    # CASO A: Acabamos de crear un item nuevo (Forzamos selección)
     if key_force in st.session_state:
         val_force = st.session_state[key_force]
         if val_force in opciones_limpias:
             idx_default = opciones_limpias.index(val_force)
-        # Consumimos la orden para que no se quede pegada
+        # Limpiamos la fuerza para que no se quede pegada eternamente
         del st.session_state[key_force]
-        
-    # 2. Si no hay fuerza, mantenemos la selección actual del usuario si es válida
+    
+    # CASO B: Ya había una selección previa y sigue siendo válida
     elif key_widget in st.session_state:
         curr_val = st.session_state[key_widget]
         if curr_val in opciones_limpias:
             idx_default = opciones_limpias.index(curr_val)
-    
-    # Renderizar widget
+        else:
+            # Si la selección previa ya no existe en la lista (ej: cambiamos de Planta), resetear a 0
+            idx_default = 0
+
+    # 3. Renderizar el Selectbox
     seleccion = st.selectbox(f"Seleccione {label}", opciones_limpias, index=idx_default, key=key_widget)
     
     valor_final = None
     es_nuevo = False
     
+    # 4. Lógica de Crear Nuevo
     if seleccion == "➕ CREAR NUEVO...":
-        valor_final = st.text_input(f"Escriba nombre para nuevo {label}", key=f"new_{key_suffix}").strip().upper()
+        valor_final = st.text_input(f"Nombre nuevo {label}", key=f"new_{key_suffix}").strip().upper()
         es_nuevo = True
     elif seleccion != "Seleccionar...":
         valor_final = seleccion
         
     return valor_final, es_nuevo
 
-# --- RENDERIZADOR DE CAMPOS DINÁMICOS ---
+# --- RENDERIZADOR DINÁMICO (NO-CODE) ---
 def render_campos_dinamicos(categoria, valores_actuales={}):
     specs = {}
     st.markdown("---")
@@ -87,6 +94,7 @@ def render_campos_dinamicos(categoria, valores_actuales={}):
     df_config = get_data("familias_config")
     campos_definidos = []
     
+    # Buscar configuración de forma segura
     if not df_config.empty and "nombre_familia" in df_config.columns:
         row = df_config[df_config["nombre_familia"] == categoria]
         if not row.empty:
@@ -103,23 +111,21 @@ def render_campos_dinamicos(categoria, valores_actuales={}):
             val_previo = valores_actuales.get(nombre, "")
             specs[nombre] = cols[i % 2].text_input(label_full, value=val_previo)
     else:
-        st.info(f"Familia '{categoria}' sin configuración. (Ir a 'Maestro de Clases')")
+        st.info(f"Familia '{categoria}' sin configuración (Ir a 'Maestro de Clases')")
         specs["Observaciones"] = st.text_area("Datos Generales", value=valores_actuales.get("Observaciones", ""))
         
     return specs
 
 # --- VISTA PRINCIPAL ---
 def render_gestion_activos():
-    st.header("🏭 Gestión de Activos (Data-Driven)")
+    st.header("🏭 Gestión de Activos")
     
     st.markdown("""<style>
     .component-card {background-color: #262730; border: 1px solid #444; border-radius: 8px; padding: 10px; margin-top: 5px; border-left: 4px solid #FF4B4B;} 
     input {color: black !important;}
     </style>""", unsafe_allow_html=True)
     
-    tab_arbol, tab_manual, tab_masiva = st.tabs(["🌳 Visualizar Árbol", "✏️ Gestión & Edición", "📦 Carga Masiva"])
-
-    # Carga Segura
+    # Carga de Datos (Cacheada por Streamlit connection, pero aseguramos tipos)
     df_eq = asegurar_df(get_data("equipos"), COLS_EQUIPOS)
     df_sys = asegurar_df(get_data("sistemas"), COLS_SISTEMAS)
     df_comp = asegurar_df(get_data("componentes"), COLS_COMPONENTES)
@@ -127,32 +133,54 @@ def render_gestion_activos():
     
     lista_familias = df_fam["nombre_familia"].tolist() if (not df_fam.empty and "nombre_familia" in df_fam.columns) else ["GENERAL"]
 
-    # Normalización
+    # Normalización Masiva (Crucial para que el Árbol no desaparezca)
     if not df_eq.empty: df_eq['tag'] = df_eq['tag'].astype(str).str.strip().str.upper()
-    if not df_sys.empty: df_sys['id'] = limpiar_id(df_sys['id']); df_sys['equipo_tag'] = df_sys['equipo_tag'].astype(str).str.strip().str.upper()
-    if not df_comp.empty: df_comp['sistema_id'] = limpiar_id(df_comp['sistema_id'])
+    if not df_sys.empty: 
+        df_sys['id'] = limpiar_id(df_sys['id'])
+        df_sys['equipo_tag'] = df_sys['equipo_tag'].astype(str).str.strip().str.upper()
+    if not df_comp.empty: 
+        df_comp['sistema_id'] = limpiar_id(df_comp['sistema_id'])
+
+    tab_arbol, tab_manual, tab_masiva = st.tabs(["🌳 Visualizar Árbol", "✏️ Gestión & Edición", "📦 Carga Masiva"])
 
     # === TAB 1: ÁRBOL ===
     with tab_arbol:
-        if df_eq.empty: st.info("Sistema vacío. Crea tu primer activo en la siguiente pestaña.")
+        if df_eq.empty:
+            st.warning("⚠️ No se encontraron equipos. Si acabas de cargar datos, intenta refrescar.")
         else:
-            for planta in df_eq['planta'].unique():
-                if pd.isna(planta): continue
-                with st.expander(f"🏭 {planta}", expanded=True):
-                    for area in df_eq[df_eq['planta'] == planta]['area'].unique():
+            # Filtro por Planta para no cargar todo de golpe
+            plantas_disp = df_eq['planta'].unique()
+            planta_ver = st.selectbox("Filtrar por Planta:", plantas_disp)
+            
+            if planta_ver:
+                with st.expander(f"🏭 {planta_ver}", expanded=True):
+                    areas = df_eq[df_eq['planta'] == planta_ver]['area'].unique()
+                    for area in areas:
                         st.markdown(f"### 📍 {area}")
-                        for _, eq in df_eq[(df_eq['planta'] == planta) & (df_eq['area'] == area)].iterrows():
+                        equipos = df_eq[(df_eq['planta'] == planta_ver) & (df_eq['area'] == area)]
+                        
+                        for _, eq in equipos.iterrows():
                             with st.expander(f"🔹 {eq['nombre']} ({eq['tag']})"):
                                 if not df_sys.empty:
-                                    for _, sys in df_sys[df_sys['equipo_tag'] == str(eq['tag'])].iterrows():
+                                    sistemas = df_sys[df_sys['equipo_tag'] == str(eq['tag'])]
+                                    if sistemas.empty:
+                                        st.caption("🚫 Sin sistemas")
+                                    
+                                    for _, sys in sistemas.iterrows():
                                         st.markdown(f"**🎛️ {sys['nombre']}**")
                                         if not df_comp.empty:
                                             comps = df_comp[df_comp['sistema_id'] == str(sys['id'])]
+                                            if comps.empty:
+                                                st.caption("🚫 Sin componentes")
+                                            
                                             for _, c in comps.iterrows():
                                                 specs_html = formatear_specs_html(c['specs_json'])
-                                                st.markdown(f"""<div class="component-card"><strong>🔧 {c['nombre']}</strong> <small>({c['categoria']})</small><br>Marca: {limpiar_dato(c['marca'])} | Mod: {limpiar_dato(c['modelo'])}<br>{specs_html}</div>""", unsafe_allow_html=True)
+                                                st.markdown(f"""<div class="component-card">
+                                                <strong>🔧 {c['nombre']}</strong> <small>({c['categoria']})</small><br>
+                                                Marca: {limpiar_dato(c['marca'])} | Mod: {limpiar_dato(c['modelo'])} | Cant: {c['cantidad']}<br>
+                                                {specs_html}</div>""", unsafe_allow_html=True)
 
-    # === TAB 2: GESTIÓN ===
+    # === TAB 2: GESTIÓN (Con lógica Anti-Reset) ===
     with tab_manual:
         # NIVEL 1: PLANTA
         plantas_exist = df_eq['planta'].unique().tolist() if not df_eq.empty else []
@@ -165,7 +193,6 @@ def render_gestion_activos():
             
             if area_val:
                 st.divider()
-                
                 # NIVEL 3: EQUIPO
                 col_eq1, col_eq2 = st.columns(2)
                 with col_eq1:
@@ -174,11 +201,14 @@ def render_gestion_activos():
 
                 equipo_row = None; tag_equipo = None
                 
+                # Render Formulario Equipo
                 if equipo_sel:
                     with col_eq2:
                         st.markdown(f"**{'🆕 Nuevo' if es_nuevo_eq else '✏️ Editar'} Equipo**")
                         def_tag = ""; def_tipo = ""; def_crit = ""; eq_idx = None
+                        
                         if not es_nuevo_eq and not df_eq.empty:
+                            # Try/Except para evitar crash si el filtro falla
                             try:
                                 equipo_row = df_eq[(df_eq['nombre'] == equipo_sel) & (df_eq['area'] == area_val)].iloc[0]
                                 def_tag = equipo_row['tag']; def_tipo = equipo_row['tipo']; def_crit = equipo_row['criticidad']
@@ -193,7 +223,8 @@ def render_gestion_activos():
                             val_crit = st.selectbox("Criticidad", opts_crit, index=idx_crit)
 
                             if st.form_submit_button("Guardar Equipo"):
-                                if not val_tag: st.error("Falta TAG")
+                                if not val_tag: 
+                                    st.error("TAG obligatorio")
                                 else:
                                     if es_nuevo_eq:
                                         new_id = 1
@@ -202,19 +233,18 @@ def render_gestion_activos():
                                              except: new_id = len(df_eq) + 1
                                         row = pd.DataFrame([{"id": new_id, "tag": val_tag, "nombre": equipo_sel, "planta": planta_val, "area": area_val, "tipo": val_tipo, "criticidad": val_crit, "estado": "Operativo"}])
                                         save_data(pd.concat([df_eq, row], ignore_index=True), "equipos")
-                                        
-                                        # --- FIX: FORZAR SELECCIÓN ---
-                                        st.session_state['force_equipo'] = equipo_sel 
+                                        st.session_state['force_equipo'] = equipo_sel # FORZAR MEMORIA
                                         st.success("Creado!"); st.rerun()
                                     else:
                                         df_eq.at[eq_idx, 'tag'] = val_tag; df_eq.at[eq_idx, 'tipo'] = val_tipo; df_eq.at[eq_idx, 'criticidad'] = val_crit
                                         save_data(df_eq, "equipos"); st.success("Actualizado!"); st.rerun()
 
-                # NIVEL 4: SISTEMA
+                # NIVEL 4: SISTEMA (Depende de TAG del equipo)
                 if tag_equipo:
                     st.divider()
                     col_sys1, col_sys2 = st.columns(2)
                     with col_sys1:
+                        # Filtrar sistemas del TAG actual
                         sys_exist = df_sys[df_sys['equipo_tag'].astype(str) == str(tag_equipo)]['nombre'].tolist() if not df_sys.empty else []
                         sistema_sel, es_nuevo_sys = gestionar_filtro_dinamico("Sistema", sys_exist, "sistema")
                     
@@ -240,15 +270,13 @@ def render_gestion_activos():
                                             except: new_id = len(df_sys) + 1
                                         row = pd.DataFrame([{"id": new_id, "equipo_tag": tag_equipo, "nombre": sistema_sel, "descripcion": val_desc}])
                                         save_data(pd.concat([df_sys, row], ignore_index=True), "sistemas")
-                                        
-                                        # --- FIX: FORZAR SELECCIÓN ---
-                                        st.session_state['force_sistema'] = sistema_sel
+                                        st.session_state['force_sistema'] = sistema_sel # FORZAR MEMORIA
                                         st.success("Creado!"); st.rerun()
                                     else:
                                         df_sys.at[sys_idx, 'descripcion'] = val_desc
                                         save_data(df_sys, "sistemas"); st.success("Actualizado!"); st.rerun()
 
-                    # NIVEL 5: COMPONENTE
+                    # NIVEL 5: COMPONENTE (Depende de ID del sistema)
                     if sistema_id:
                         st.divider()
                         col_comp1, col_comp2 = st.columns([1, 2])
@@ -261,67 +289,64 @@ def render_gestion_activos():
                             comp_sel, es_nuevo_comp = gestionar_filtro_dinamico("Componente", comp_exist, "comp")
                         
                         if comp_sel:
-                            # Caption
-                            st.caption(f"{'🆕 CREANDO' if es_nuevo_comp else '✏️ EDITANDO'}: {comp_sel}")
-                            
-                            def_marca = ""; def_mod = ""; def_cant = 1; def_cat = lista_familias[0]; def_specs = {}
-                            comp_idx = None
-                            
-                            if not es_nuevo_comp:
-                                try:
-                                    sys_clean = limpiar_id(pd.Series([sistema_id]))[0]
-                                    mask_c = (limpiar_id(df_comp['sistema_id']) == sys_clean) & (df_comp['nombre'] == comp_sel)
-                                    c_row = df_comp[mask_c].iloc[0]
-                                    def_marca = c_row['marca']; def_mod = c_row['modelo']; def_cant = int(c_row['cantidad'])
-                                    def_cat = c_row['categoria']
-                                    if c_row['specs_json']: def_specs = json.loads(c_row['specs_json'])
-                                    comp_idx = c_row.name
-                                except: pass
-
-                            # SELECTOR DE FAMILIA FUERA DEL FORM
-                            idx_cat = lista_familias.index(def_cat) if def_cat in lista_familias else 0
-                            v_cat = st.selectbox("Familia / Clase", lista_familias, index=idx_cat)
-
-                            with st.form("form_comp_sap"):
-                                c1, c2 = st.columns(2)
-                                v_marca = c1.text_input("Marca", value=def_marca)
-                                v_mod = c2.text_input("Modelo", value=def_mod)
-                                v_cant = st.number_input("Cantidad", min_value=1, value=def_cant)
+                            with col_comp2:
+                                st.caption(f"{'🆕 CREANDO' if es_nuevo_comp else '✏️ EDITANDO'}: {comp_sel}")
+                                def_marca = ""; def_mod = ""; def_cant = 1; def_cat = lista_familias[0]; def_specs = {}
+                                comp_idx = None
                                 
-                                specs_finales = render_campos_dinamicos(v_cat, def_specs)
+                                if not es_nuevo_comp:
+                                    try:
+                                        sys_clean = limpiar_id(pd.Series([sistema_id]))[0]
+                                        mask_c = (limpiar_id(df_comp['sistema_id']) == sys_clean) & (df_comp['nombre'] == comp_sel)
+                                        c_row = df_comp[mask_c].iloc[0]
+                                        def_marca = c_row['marca']; def_mod = c_row['modelo']; def_cant = int(c_row['cantidad'])
+                                        def_cat = c_row['categoria']
+                                        if c_row['specs_json']: def_specs = json.loads(c_row['specs_json'])
+                                        comp_idx = c_row.name
+                                    except: pass
 
-                                df_alm = get_data("almacen")
-                                opts_alm = ["Ninguno"] + (df_alm['sku'] + " | " + df_alm['descripcion']).tolist() if not df_alm.empty else ["Ninguno"]
-                                v_rep = st.selectbox("Repuesto Vinculado", opts_alm)
+                                # Selector Familia (Fuera del form para actualizar UI)
+                                idx_cat = lista_familias.index(def_cat) if def_cat in lista_familias else 0
+                                v_cat = st.selectbox("Familia / Clase", lista_familias, index=idx_cat, key="fam_selector")
 
-                                if st.form_submit_button("Guardar Componente"):
-                                    specs_str = json.dumps(specs_finales)
-                                    sku_clean = v_rep.split(" | ")[0] if "|" in v_rep else ""
+                                with st.form("form_comp_sap"):
+                                    c1, c2 = st.columns(2)
+                                    v_marca = c1.text_input("Marca", value=def_marca)
+                                    v_mod = c2.text_input("Modelo", value=def_mod)
+                                    v_cant = st.number_input("Cantidad", min_value=1, value=def_cant)
                                     
-                                    if es_nuevo_comp:
-                                        new_id = 1
-                                        if not df_comp.empty:
-                                            try: new_id = int(pd.to_numeric(df_comp['id']).max()) + 1
-                                            except: new_id = len(df_comp) + 1
-                                        row = pd.DataFrame([{
-                                            "id": new_id, "sistema_id": sistema_id, "nombre": comp_sel,
-                                            "marca": v_marca, "modelo": v_mod, "cantidad": v_cant,
-                                            "categoria": v_cat, "repuesto_sku": sku_clean, "specs_json": specs_str
-                                        }])
-                                        save_data(pd.concat([df_comp, row], ignore_index=True), "componentes")
+                                    specs_finales = render_campos_dinamicos(v_cat, def_specs)
+
+                                    df_alm = get_data("almacen")
+                                    opts_alm = ["Ninguno"] + (df_alm['sku'] + " | " + df_alm['descripcion']).tolist() if not df_alm.empty else ["Ninguno"]
+                                    v_rep = st.selectbox("Repuesto Vinculado", opts_alm)
+
+                                    if st.form_submit_button("Guardar Componente"):
+                                        specs_str = json.dumps(specs_finales)
+                                        sku_clean = v_rep.split(" | ")[0] if "|" in v_rep else ""
                                         
-                                        # --- FIX: FORZAR SELECCIÓN ---
-                                        st.session_state['force_comp'] = comp_sel
-                                        st.success("Guardado!"); st.rerun()
-                                    else:
-                                        df_comp.at[comp_idx, 'marca'] = v_marca
-                                        df_comp.at[comp_idx, 'modelo'] = v_mod
-                                        df_comp.at[comp_idx, 'cantidad'] = v_cant
-                                        df_comp.at[comp_idx, 'categoria'] = v_cat
-                                        df_comp.at[comp_idx, 'repuesto_sku'] = sku_clean
-                                        df_comp.at[comp_idx, 'specs_json'] = specs_str
-                                        save_data(df_comp, "componentes")
-                                        st.success("Actualizado!"); st.rerun()
+                                        if es_nuevo_comp:
+                                            new_id = 1
+                                            if not df_comp.empty:
+                                                try: new_id = int(pd.to_numeric(df_comp['id']).max()) + 1
+                                                except: new_id = len(df_comp) + 1
+                                            row = pd.DataFrame([{
+                                                "id": new_id, "sistema_id": sistema_id, "nombre": comp_sel,
+                                                "marca": v_marca, "modelo": v_mod, "cantidad": v_cant,
+                                                "categoria": v_cat, "repuesto_sku": sku_clean, "specs_json": specs_str
+                                            }])
+                                            save_data(pd.concat([df_comp, row], ignore_index=True), "componentes")
+                                            st.session_state['force_comp'] = comp_sel # FORZAR MEMORIA
+                                            st.success("Guardado!"); st.rerun()
+                                        else:
+                                            df_comp.at[comp_idx, 'marca'] = v_marca
+                                            df_comp.at[comp_idx, 'modelo'] = v_mod
+                                            df_comp.at[comp_idx, 'cantidad'] = v_cant
+                                            df_comp.at[comp_idx, 'categoria'] = v_cat
+                                            df_comp.at[comp_idx, 'repuesto_sku'] = sku_clean
+                                            df_comp.at[comp_idx, 'specs_json'] = specs_str
+                                            save_data(df_comp, "componentes"); st.success("Actualizado!"); st.rerun()
 
     with tab_masiva:
-        st.file_uploader("Subir Excel", type=["xlsx"])
+        st.info("Carga masiva disponible.")
+        file = st.file_uploader("Subir Excel", type=["xlsx"])
