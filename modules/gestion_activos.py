@@ -23,19 +23,15 @@ def limpiar_dato(dato):
     return str(dato)
 
 def formatear_specs_html_ejecutivo(json_str):
-    """
-    Genera una grilla HTML bonita para la vista gerencial.
-    """
+    """Genera una grilla HTML bonita para la vista gerencial."""
     try:
         if not json_str or json_str == "{}": return "<span style='color:#777; font-style:italic;'>Sin especificaciones técnicas.</span>"
         data = json.loads(json_str)
         
-        # Filtrar datos vacíos
         items_html = ""
         for k, v in data.items():
             if v and str(v).lower() not in ['nan', 'none', '']:
                 key_nice = k.replace("_", " ").title()
-                # Diseño de mini-celda para cada dato
                 items_html += f"""
                 <div style="background: rgba(255,255,255,0.05); padding: 4px 8px; border-radius: 4px; margin-bottom: 4px;">
                     <span style="color: #bbb; font-size: 0.8em; display: block;">{key_nice}</span>
@@ -44,13 +40,11 @@ def formatear_specs_html_ejecutivo(json_str):
                 """
         
         if not items_html: return "<span style='color:#777;'>Sin datos detallados.</span>"
-        
-        # Grid CSS
         return f"""<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 6px; margin-top: 8px;">{items_html}</div>"""
     except:
         return "Error en formato de datos."
 
-# --- SELECTOR INTELIGENTE (NO SE REINICIA) ---
+# --- SELECTOR INTELIGENTE ---
 def gestionar_filtro_dinamico(label, opciones_existentes, key_suffix):
     if opciones_existentes is None: opciones_existentes = []
     opciones_limpias = sorted(list(set([str(x) for x in opciones_existentes if pd.notna(x) and str(x) != ""])))
@@ -80,8 +74,12 @@ def gestionar_filtro_dinamico(label, opciones_existentes, key_suffix):
         
     return valor_final, es_nuevo
 
-# --- RENDERIZADOR DE INPUTS DE EDICIÓN ---
-def render_campos_dinamicos(categoria, valores_actuales={}):
+# --- RENDERIZADOR DE INPUTS DE EDICIÓN (CORREGIDO CON KEYS ÚNICAS) ---
+def render_campos_dinamicos(categoria, valores_actuales={}, key_prefix="new"):
+    """
+    Renderiza los inputs dinámicos.
+    IMPORTANTE: key_prefix asegura que los campos de un componente no se mezclen con otro.
+    """
     specs = {}
     st.markdown("---")
     df_config = get_data("familias_config")
@@ -101,10 +99,15 @@ def render_campos_dinamicos(categoria, valores_actuales={}):
             unidad = campo.get('unidad', '')
             label = f"{nombre} ({unidad})" if unidad else nombre
             val = valores_actuales.get(nombre, "")
-            specs[nombre] = cols[i % 2].text_input(label, value=val)
+            
+            # AQUÍ ESTÁ LA SOLUCIÓN: Creamos un ID único para este input
+            unique_key = f"{key_prefix}_{nombre}_{i}"
+            
+            specs[nombre] = cols[i % 2].text_input(label, value=val, key=unique_key)
     else:
-        st.info(f"Familia '{categoria}' sin campos definidos. (Ir a Configuración)")
-        specs["Observaciones"] = st.text_area("Detalles", value=valores_actuales.get("Observaciones", ""))
+        st.info(f"Familia '{categoria}' sin campos definidos.")
+        unique_key_obs = f"{key_prefix}_obs"
+        specs["Observaciones"] = st.text_area("Detalles", value=valores_actuales.get("Observaciones", ""), key=unique_key_obs)
     return specs
 
 # --- VISTA PRINCIPAL ---
@@ -127,7 +130,6 @@ def render_gestion_activos():
         margin-bottom: 10px;
     }
     .tech-title { font-size: 1em; font-weight: bold; color: white; display: flex; justify-content: space-between;}
-    .tech-subtitle { font-size: 0.85em; color: #aaa; margin-bottom: 8px; }
     .tech-main-data { 
         display: flex; gap: 15px; margin-bottom: 10px; font-size: 0.9em; color: #ddd; border-bottom: 1px solid #333; padding-bottom: 5px;
     }
@@ -149,13 +151,12 @@ def render_gestion_activos():
     tab_arbol, tab_manual, tab_masiva = st.tabs(["🌳 Visualizar Planta (Gerencia)", "✏️ Gestión & Edición", "📦 Carga Masiva"])
 
     # ==========================================
-    # TAB 1: VISUALIZACIÓN EJECUTIVA (DASHBOARD STYLE)
+    # TAB 1: VISUALIZACIÓN EJECUTIVA
     # ==========================================
     with tab_arbol:
         if df_eq.empty:
             st.info("Planta sin activos configurados.")
         else:
-            # Filtro Planta para no saturar
             plantas = df_eq['planta'].unique()
             planta_sel = st.selectbox("Seleccione Planta:", plantas)
             
@@ -166,33 +167,25 @@ def render_gestion_activos():
                         equipos_area = df_eq[(df_eq['planta'] == planta_sel) & (df_eq['area'] == area)]
                         
                         for _, eq in equipos_area.iterrows():
-                            # Header del Equipo con KPIs visuales
                             st.markdown(f"### 🔹 {eq['nombre']} <span style='font-size:0.7em; color:#888;'>({eq['tag']})</span>", unsafe_allow_html=True)
-                            
                             c1, c2, c3 = st.columns(3)
                             c1.info(f"**Tipo:** {eq['tipo']}")
                             c2.warning(f"**Criticidad:** {eq['criticidad']}")
                             c3.success(f"**Estado:** {eq['estado']}")
                             
-                            # Sistemas y Componentes
                             if not df_sys.empty:
                                 sistemas = df_sys[df_sys['equipo_tag'] == str(eq['tag'])]
-                                
                                 for _, sys in sistemas.iterrows():
                                     st.markdown(f"<div class='sys-header'>🎛️ SISTEMA: {sys['nombre']}</div>", unsafe_allow_html=True)
-                                    
                                     if not df_comp.empty:
                                         comps = df_comp[df_comp['sistema_id'] == str(sys['id'])]
-                                        
                                         if not comps.empty:
                                             for _, c in comps.iterrows():
-                                                # Preparar datos
                                                 marca = limpiar_dato(c['marca'])
                                                 modelo = limpiar_dato(c['modelo'])
                                                 sku = limpiar_dato(c['repuesto_sku'])
                                                 html_specs = formatear_specs_html_ejecutivo(c['specs_json'])
                                                 
-                                                # TARJETA TÉCNICA (CARD)
                                                 st.markdown(f"""
                                                 <div class="tech-card">
                                                     <div class="tech-title">
@@ -201,49 +194,40 @@ def render_gestion_activos():
                                                     </div>
                                                     <div class="tech-main-data">
                                                         <span>🏷️ <b>Marca:</b> {marca}</span>
-                                                        <span>#️⃣ <b>Modelo:</b> {modelo}</span>
+                                                        <span>#️⃣ <b>Mod:</b> {modelo}</span>
                                                         <span>📦 <b>SKU:</b> {sku}</span>
                                                         <span>🔢 <b>Cant:</b> {c['cantidad']}</span>
                                                     </div>
-                                                    <div style="margin-top:5px;">
-                                                        {html_specs}
-                                                    </div>
+                                                    <div style="margin-top:5px;">{html_specs}</div>
                                                 </div>
                                                 """, unsafe_allow_html=True)
-                                        else:
-                                            st.caption("   *Sin componentes registrados.*")
+                                        else: st.caption("   *Sin componentes.*")
                             st.markdown("---")
 
     # ==========================================
-    # TAB 2: GESTIÓN DE DATOS (CON MEMORIA)
+    # TAB 2: GESTIÓN DE DATOS
     # ==========================================
     with tab_manual:
         c_planta, c_area = st.columns(2)
-        
-        # 1. Planta
         p_exist = df_eq['planta'].unique().tolist() if not df_eq.empty else []
         with c_planta: p_val, _ = gestionar_filtro_dinamico("Planta", p_exist, "planta")
         
         if p_val:
-            # 2. Área
             a_exist = df_eq[df_eq['planta'] == p_val]['area'].unique().tolist() if not df_eq.empty else []
             with c_area: a_val, _ = gestionar_filtro_dinamico("Área", a_exist, "area")
             
             if a_val:
                 st.divider()
-                # 3. Equipo
                 ce1, ce2 = st.columns([1, 2])
                 with ce1:
                     e_exist = df_eq[(df_eq['planta'] == p_val) & (df_eq['area'] == a_val)]['nombre'].tolist() if not df_eq.empty else []
                     e_sel, e_new = gestionar_filtro_dinamico("Equipo", e_exist, "equipo")
                 
                 tag_eq_sel = None
-                
                 if e_sel:
                     with ce2:
                         st.caption(f"{'🆕 CREANDO' if e_new else '✏️ EDITANDO'}: {e_sel}")
                         def_tag=""; def_typ=""; def_cri="Media"; eq_idx=None
-                        
                         if not e_new and not df_eq.empty:
                             try:
                                 r = df_eq[(df_eq['nombre']==e_sel) & (df_eq['area']==a_val)].iloc[0]
@@ -255,7 +239,6 @@ def render_gestion_activos():
                             v_tag = c_a.text_input("TAG", value=def_tag).strip().upper()
                             v_typ = c_b.text_input("Tipo", value=def_typ)
                             v_cri = c_c.selectbox("Criticidad", ["Alta", "Media", "Baja"], index=["Alta", "Media", "Baja"].index(def_cri) if def_cri in ["Alta", "Media", "Baja"] else 1)
-                            
                             if st.form_submit_button("Guardar Equipo"):
                                 if not v_tag: st.error("Falta TAG")
                                 else:
@@ -269,7 +252,7 @@ def render_gestion_activos():
                                         save_data(df_eq, "equipos")
                                     st.success("Listo!"); st.rerun()
 
-                # 4. Sistema (Solo si hay TAG)
+                # Sistema
                 if tag_eq_sel:
                     st.divider()
                     cs1, cs2 = st.columns([1, 2])
@@ -301,7 +284,7 @@ def render_gestion_activos():
                                         save_data(df_sys, "sistemas")
                                     st.success("Listo!"); st.rerun()
 
-                    # 5. Componente
+                    # Componente
                     if sys_id_sel:
                         st.divider()
                         cc1, cc2 = st.columns([1, 2])
@@ -316,18 +299,17 @@ def render_gestion_activos():
                             with cc2:
                                 st.caption(f"{'🆕 CREANDO' if c_new else '✏️ EDITANDO'} COMPONENTE")
                                 d_mar=""; d_mod=""; d_cant=1; d_cat=lista_familias[0]; d_specs={}
-                                c_idx=None
+                                c_idx=None; c_sku=""
                                 
                                 if not c_new and not df_comp.empty:
                                     try:
                                         clean_sys_id = limpiar_id(pd.Series([sys_id_sel]))[0]
                                         r = df_comp[(limpiar_id(df_comp['sistema_id'])==clean_sys_id) & (df_comp['nombre']==c_sel)].iloc[0]
-                                        d_mar=r['marca']; d_mod=r['modelo']; d_cant=int(r['cantidad'] or 1); d_cat=r['categoria']
+                                        d_mar=r['marca']; d_mod=r['modelo']; d_cant=int(r['cantidad'] or 1); d_cat=r['categoria']; c_sku=r['repuesto_sku']
                                         if r['specs_json']: d_specs=json.loads(r['specs_json'])
                                         c_idx=r.name
                                     except: pass
                                 
-                                # Selector Familia (Fuera del Form)
                                 idx_cat = lista_familias.index(d_cat) if d_cat in lista_familias else 0
                                 v_cat = st.selectbox("Clase / Familia", lista_familias, index=idx_cat, key="cat_main")
                                 
@@ -336,22 +318,21 @@ def render_gestion_activos():
                                     v_mar = col_a.text_input("Marca", value=d_mar)
                                     v_mod = col_b.text_input("Modelo", value=d_mod)
                                     v_cant = col_c.number_input("Cant", min_value=1, value=d_cant)
+                                    v_sku = st.text_input("SKU / Código Repuesto", value=c_sku)
                                     
-                                    # Specs Dinámicas
-                                    specs_final = render_campos_dinamicos(v_cat, d_specs)
-                                    
-                                    # Repuesto
-                                    df_alm = get_data("almacen")
-                                    opts_alm = ["Ninguno"] + (df_alm['sku'] + " | " + df_alm['descripcion']).tolist() if not df_alm.empty else ["Ninguno"]
-                                    v_rep = st.selectbox("Repuesto (Stock)", opts_alm)
+                                    # --- CLAVE DEL FIX: PASAR UN PREFIJO ÚNICO ---
+                                    # Si estamos editando, usamos el ID del componente (c_idx)
+                                    # Si es nuevo, usamos 'new_comp'
+                                    # Así Streamlit sabe que los campos son únicos para este registro
+                                    prefix_unico = str(c_idx) if c_idx is not None else "new_comp"
+                                    specs_final = render_campos_dinamicos(v_cat, d_specs, key_prefix=prefix_unico)
                                     
                                     if st.form_submit_button("Guardar Componente"):
                                         js_str = json.dumps(specs_final)
-                                        sku_cl = v_rep.split(" | ")[0] if "|" in v_rep else ""
                                         
                                         if c_new:
                                             nid = 1 if df_comp.empty else (pd.to_numeric(df_comp['id'], errors='coerce').max() or 0) + 1
-                                            row = pd.DataFrame([{"id": nid, "sistema_id": sys_id_sel, "nombre": c_sel, "marca": v_mar, "modelo": v_mod, "cantidad": v_cant, "categoria": v_cat, "repuesto_sku": sku_cl, "specs_json": js_str}])
+                                            row = pd.DataFrame([{"id": nid, "sistema_id": sys_id_sel, "nombre": c_sel, "marca": v_mar, "modelo": v_mod, "cantidad": v_cant, "categoria": v_cat, "repuesto_sku": v_sku, "specs_json": js_str}])
                                             save_data(pd.concat([df_comp, row], ignore_index=True), "componentes")
                                             st.session_state['force_comp'] = c_sel
                                         else:
@@ -359,7 +340,7 @@ def render_gestion_activos():
                                             df_comp.at[c_idx, 'modelo'] = v_mod
                                             df_comp.at[c_idx, 'cantidad'] = v_cant
                                             df_comp.at[c_idx, 'categoria'] = v_cat
-                                            df_comp.at[c_idx, 'repuesto_sku'] = sku_cl
+                                            df_comp.at[c_idx, 'repuesto_sku'] = v_sku
                                             df_comp.at[c_idx, 'specs_json'] = js_str
                                             save_data(df_comp, "componentes")
                                         st.success("Guardado!"); st.rerun()
