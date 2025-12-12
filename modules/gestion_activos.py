@@ -5,7 +5,7 @@ from utils.db_con import get_data, save_data
 
 # --- CONFIGURACIÓN ESTRUCTURAL ---
 COLS_EQUIPOS = ["id", "tag", "nombre", "planta", "area", "tipo", "criticidad", "estado"]
-COLS_SISTEMAS = ["id", "equipo_tag", "nombre", "descripcion", "tipo_sistema"] # Agregamos tipo_sistema
+COLS_SISTEMAS = ["id", "equipo_tag", "nombre", "descripcion"]
 COLS_COMPONENTES = ["id", "sistema_id", "nombre", "marca", "modelo", "cantidad", "categoria", "repuesto_sku", "specs_json"]
 
 # --- FUNCIONES DE LIMPIEZA ---
@@ -16,11 +16,22 @@ def asegurar_df(df, columnas_base):
     return df
 
 def limpiar_id(serie):
+    """Convierte IDs a string sin decimales (.0)"""
     return serie.astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
 
 def limpiar_dato(dato):
     if pd.isna(dato) or str(dato).lower() in ['nan', 'none', ''] or str(dato).strip() == "": return "-"
     return str(dato)
+
+def obtener_nuevo_id(df):
+    """Genera un ID entero seguro, evitando errores con NaNs"""
+    if df.empty: return 1
+    if 'id' not in df.columns: return 1
+    try:
+        # Forzamos conversión a número, los errores se vuelven NaN y luego 0
+        return int(pd.to_numeric(df['id'], errors='coerce').fillna(0).max()) + 1
+    except:
+        return len(df) + 1
 
 def formatear_specs_html_ejecutivo(json_str):
     try:
@@ -49,6 +60,7 @@ def gestionar_filtro_dinamico_persistente(label, opciones_existentes, key_unique
     key_f = f"force_{key_unique}"
     idx = 0
     
+    # Lógica de memoria
     if key_f in st.session_state:
         val = st.session_state[key_f]
         if val in lista: idx = lista.index(val)
@@ -67,17 +79,16 @@ def gestionar_filtro_dinamico_persistente(label, opciones_existentes, key_unique
         
     return val_final, es_new
 
-# --- RENDERIZADOR DE CAMPOS ---
+# --- RENDERIZADOR CAMPOS ---
 def render_campos_dinamicos(categoria, sistema_asociado, valores_actuales={}, key_prefix="new"):
     specs = {}
     st.markdown("---")
     
-    # Buscamos la familia, validando que pertenezca al sistema correcto o sea general
     df_fam = get_data("familias_config")
     campos = []
     
     if not df_fam.empty:
-        # Filtro doble: Nombre Familia y Sistema Asociado
+        # Filtro estricto: Familia Y Sistema Padre
         mask = (df_fam["nombre_familia"] == categoria) & (df_fam["sistema_asociado"] == sistema_asociado)
         row = df_fam[mask]
         if not row.empty:
@@ -110,8 +121,6 @@ def render_gestion_activos():
     # Maestros
     df_sys_conf = get_data("sistemas_config")
     df_fam_conf = get_data("familias_config")
-    
-    # Listas Maestras
     list_sistemas_std = df_sys_conf["nombre_sistema"].tolist() if not df_sys_conf.empty else []
 
     # Normalizar
@@ -132,12 +141,11 @@ def render_gestion_activos():
                         eqs = df_eq[(df_eq['planta']==planta_sel) & (df_eq['area']==area)]
                         for _, eq in eqs.iterrows():
                             st.markdown(f"### 🔹 {eq['nombre']} <small>({eq['tag']})</small>", unsafe_allow_html=True)
+                            
                             if not df_sys.empty:
                                 sistemas = df_sys[df_sys['equipo_tag'] == str(eq['tag'])]
                                 for _, sys in sistemas.iterrows():
-                                    tipo_sys = sys['nombre'] # El nombre del sistema es el TIPO (Ej: TRANSMISION)
-                                    desc_sys = f" - {sys['descripcion']}" if sys['descripcion'] else ""
-                                    st.markdown(f"**🎛️ {tipo_sys}{desc_sys}**")
+                                    st.markdown(f"**🎛️ {sys['nombre']}**")
                                     
                                     if not df_comp.empty:
                                         comps = df_comp[df_comp['sistema_id'] == str(sys['id'])]
@@ -193,7 +201,7 @@ def render_gestion_activos():
                                 if not i_tag: st.error("TAG requerido")
                                 else:
                                     if new_eq:
-                                        nid = 1 if df_eq.empty else (pd.to_numeric(df_eq['id'], errors='coerce').max() or 0)+1
+                                        nid = obtener_nuevo_id(df_eq)
                                         row = pd.DataFrame([{"id":nid, "tag":i_tag, "nombre":sel_eq, "planta":v_planta, "area":v_area, "tipo":i_typ, "criticidad":"Media", "estado":"OK"}])
                                         save_data(pd.concat([df_eq, row], ignore_index=True), "equipos")
                                         st.session_state['force_equipo'] = sel_eq
@@ -202,7 +210,7 @@ def render_gestion_activos():
                                         save_data(df_eq, "equipos")
                                     st.success("Ok"); st.rerun()
 
-                # --- SISTEMA (Debe venir del Maestro) ---
+                # --- SISTEMA ---
                 if tag_eq:
                     st.divider()
                     cs1, cs2 = st.columns([1,2])
@@ -210,14 +218,12 @@ def render_gestion_activos():
                         l_sys = df_sys[df_sys['equipo_tag'].astype(str)==str(tag_eq)]['nombre'].tolist() if not df_sys.empty else []
                         sel_sys, new_sys = gestionar_filtro_dinamico_persistente("Sistema", l_sys, "sistema")
                     
-                    id_sys = None; tipo_sistema_actual = None
+                    id_sys = None; tipo_sys_actual = None
                     if sel_sys:
                         with cs2:
                             st.caption(f"SISTEMA: {sel_sys}")
                             d_desc=""; sys_idx=None
-                            
-                            # Si es nuevo, usamos el nombre seleccionado como el TIPO DE SISTEMA
-                            tipo_sistema_actual = sel_sys
+                            tipo_sys_actual = sel_sys # El nombre del sistema es su tipo
                             
                             if not new_sys and not df_sys.empty:
                                 try:
@@ -226,18 +232,12 @@ def render_gestion_activos():
                                 except: pass
                             
                             with st.form("f_sys"):
-                                # Si es nuevo, sugerimos elegir del maestro para estandarizar
                                 if new_sys:
-                                    st.write(f"Creando: **{sel_sys}**")
-                                    if sel_sys not in list_sistemas_std:
-                                        st.warning("⚠️ Este nombre no está en el Maestro de Sistemas.")
-                                
-                                i_desc = st.text_input("Descripción / Detalle", value=d_desc)
-                                
+                                    if sel_sys not in list_sistemas_std: st.warning("⚠️ Nombre no estándar.")
+                                i_desc = st.text_input("Descripción", value=d_desc)
                                 if st.form_submit_button("Guardar Sistema"):
                                     if new_sys:
-                                        nid = 1 if df_sys.empty else (pd.to_numeric(df_sys['id'], errors='coerce').max() or 0)+1
-                                        # Guardamos el nombre como el tipo de sistema
+                                        nid = obtener_nuevo_id(df_sys)
                                         row = pd.DataFrame([{"id":nid, "equipo_tag":tag_eq, "nombre":sel_sys, "descripcion":i_desc}])
                                         save_data(pd.concat([df_sys, row], ignore_index=True), "sistemas")
                                         st.session_state['force_sistema'] = sel_sys
@@ -246,7 +246,7 @@ def render_gestion_activos():
                                         save_data(df_sys, "sistemas")
                                     st.success("Ok"); st.rerun()
 
-                    # --- COMPONENTE (Filtrado por el Sistema seleccionado) ---
+                    # --- COMPONENTE ---
                     if id_sys:
                         st.divider()
                         cc1, cc2 = st.columns([1,2])
@@ -261,15 +261,15 @@ def render_gestion_activos():
                             with cc2:
                                 st.caption(f"COMPONENTE: {sel_comp}")
                                 
-                                # Filtrar familias asociadas a este TIPO DE SISTEMA
-                                familias_disponibles = []
+                                # Buscar familias para este sistema
+                                fams_disp = []
                                 if not df_fam_conf.empty:
-                                    familias_disponibles = df_fam_conf[df_fam_conf["sistema_asociado"] == tipo_sistema_actual]["nombre_familia"].tolist()
+                                    fams_disp = df_fam_conf[df_fam_conf["sistema_asociado"] == tipo_sys_actual]["nombre_familia"].tolist()
                                 
-                                if not familias_disponibles:
-                                    st.error(f"El sistema '{tipo_sistema_actual}' no tiene familias configuradas en el Maestro.")
+                                if not fams_disp:
+                                    st.error(f"El sistema '{tipo_sys_actual}' no tiene familias configuradas.")
                                 else:
-                                    d_mar=""; d_mod=""; d_cant=1; d_cat=familias_disponibles[0]; d_specs={}
+                                    d_mar=""; d_mod=""; d_cant=1; d_cat=fams_disp[0]; d_specs={}
                                     c_idx=None; c_sku=""
                                     
                                     if not new_comp and not df_comp.empty:
@@ -281,9 +281,9 @@ def render_gestion_activos():
                                             c_idx=r.name
                                         except: pass
                                     
-                                    # Selector de Familia (OBLIGATORIO)
-                                    ix_c = familias_disponibles.index(d_cat) if d_cat in familias_disponibles else 0
-                                    v_cat = st.selectbox("Clase / Familia", familias_disponibles, index=ix_c, key="fam_comp")
+                                    # Selector Familia
+                                    ix_c = fams_disp.index(d_cat) if d_cat in fams_disp else 0
+                                    v_cat = st.selectbox("Clase / Familia", fams_disp, index=ix_c, key="fam_comp")
                                     
                                     with st.form("f_comp"):
                                         c_1, c_2, c_3 = st.columns(3)
@@ -292,15 +292,13 @@ def render_gestion_activos():
                                         v_cant = c_3.number_input("Cant", 1, value=d_cant)
                                         v_sku = st.text_input("SKU", value=c_sku)
                                         
-                                        # Campos dinámicos del maestro
                                         k_pref = str(c_idx) if c_idx is not None else "new"
-                                        specs_end = render_campos_dinamicos(v_cat, tipo_sistema_actual, d_specs, key_prefix=k_pref)
+                                        specs_end = render_campos_dinamicos(v_cat, tipo_sys_actual, d_specs, key_prefix=k_pref)
                                         
                                         if st.form_submit_button("Guardar Componente"):
                                             js_str = json.dumps(specs_end)
                                             if new_comp:
-                                                nid = 1 if df_comp.empty else (pd.to_numeric(df_comp['id'], errors='coerce').max() or 0)+1
-                                                # Guardamos una fila independiente (ID único)
+                                                nid = obtener_nuevo_id(df_comp)
                                                 row = pd.DataFrame([{"id":nid, "sistema_id":id_sys, "nombre":sel_comp, "categoria":v_cat, "marca":v_mar, "modelo":v_mod, "cantidad":v_cant, "repuesto_sku":v_sku, "specs_json":js_str}])
                                                 save_data(pd.concat([df_comp, row], ignore_index=True), "componentes")
                                                 st.session_state['force_comp'] = sel_comp
@@ -310,6 +308,3 @@ def render_gestion_activos():
                                                 df_comp.at[c_idx,'repuesto_sku']=v_sku; df_comp.at[c_idx,'specs_json']=js_str
                                                 save_data(df_comp, "componentes")
                                             st.success("Ok"); st.rerun()
-
-    with tab_masiva:
-        st.file_uploader("Carga Masiva", type=["xlsx"])
